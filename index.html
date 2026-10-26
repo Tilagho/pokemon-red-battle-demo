@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2b2b38" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Pokémon Red Remake — Battle Demo</title>
+  <link rel="icon" href="assets/sprites/bulbasaur.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ TITLE ============ -->
+  <section id="screen-title" class="screen active">
+    <div class="panel title-panel">
+      <div class="logo">POKéMON<br><span>RED</span><small>REMAKE · BATTLE DEMO</small></div>
+      <div class="title-sprites">
+        <img src="assets/sprites/bulbasaur.png" alt="Bulbasaur" class="sprite s2 bob" />
+        <img src="assets/sprites/ivysaur.png" alt="Ivysaur" class="sprite s2 bob d1" />
+        <img src="assets/sprites/venusaur.png" alt="Venusaur" class="sprite s2 bob d2" />
+      </div>
+      <button class="pbtn big" id="btn-start">▶ START</button>
+      <button class="pbtn small" id="btn-sound">SOUND: ON</button>
+      <p class="fine">Unofficial fan project. Not affiliated with Nintendo / Game Freak / The Pokémon Company.</p>
+    </div>
+  </section>
+
+  <!-- ============ STARTER SELECT ============ -->
+  <section id="screen-starter" class="screen">
+    <div class="panel">
+      <h2 class="box-title">CHOOSE YOUR POKéMON</h2>
+      <div id="starter-list" class="pick-list"></div>
+    </div>
+  </section>
+
+  <!-- ============ OPPONENT SELECT ============ -->
+  <section id="screen-opponent" class="screen">
+    <div class="panel">
+      <h2 class="box-title">CHOOSE A BATTLE</h2>
+      <div id="opponent-list" class="pick-list"></div>
+      <button class="pbtn small" id="btn-back-starter">◀ BACK</button>
+    </div>
+  </section>
+
+  <!-- ============ BATTLE ============ -->
+  <section id="screen-battle" class="screen">
+    <div id="field" class="field">
+      <!-- enemy -->
+      <div class="hud enemy-hud hidden" id="enemy-hud">
+        <div class="hud-name" id="enemy-name">—</div>
+        <div class="hud-lv"><span id="enemy-status" class="status"></span><span id="enemy-lv">:L1</span></div>
+        <div class="hp-row"><span class="hp-label">HP:</span><div class="hp-bar"><div class="hp-fill" id="enemy-hp"></div></div></div>
+      </div>
+      <div class="mon-slot enemy-slot"><div class="mon-anim" id="enemy-anim"><div class="clip"><img id="enemy-sprite" class="sprite" alt="" /></div></div></div>
+
+      <!-- player -->
+      <div class="mon-slot player-slot"><div class="mon-anim" id="player-anim"><div class="clip"><img id="player-sprite" class="sprite flip" alt="" /></div></div></div>
+      <div class="hud player-hud hidden" id="player-hud">
+        <div class="hud-name" id="player-name">—</div>
+        <div class="hud-lv"><span id="player-status" class="status"></span><span id="player-lv">:L1</span></div>
+        <div class="hp-row"><span class="hp-label">HP:</span><div class="hp-bar"><div class="hp-fill" id="player-hp"></div></div></div>
+        <div class="hp-num" id="player-hpnum">0/ 0</div>
+      </div>
+      <div id="fx" class="fx"></div>
+      <div id="flash" class="flash"></div>
+    </div>
+
+    <div class="controls">
+      <div class="textbox" id="textbox" role="button" aria-label="Advance text">
+        <p id="text"></p><span class="next" id="next">▼</span>
+      </div>
+
+      <div class="menu-area">
+      <div class="menu" id="menu-main" hidden>
+        <button class="pbtn" data-act="fight">FIGHT</button>
+        <button class="pbtn" data-act="pkmn">PKMN</button>
+        <button class="pbtn" data-act="item">ITEM</button>
+        <button class="pbtn" data-act="run">RUN</button>
+      </div>
+
+      <div class="menu moves" id="menu-moves" hidden>
+        <div class="move-grid" id="move-grid"></div>
+        <button class="pbtn small back" data-act="back">◀ BACK</button>
+      </div>
+
+      <div class="menu" id="menu-end" hidden>
+        <button class="pbtn" data-act="rematch">REMATCH</button>
+        <button class="pbtn" data-act="new">NEW BATTLE</button>
+      </div>
+      </div>
+    </div>
+
+    <!-- PKMN summary overlay -->
+    <div class="overlay" id="summary" hidden>
+      <div class="panel summary-panel">
+        <h2 class="box-title" id="sum-title">—</h2>
+        <img id="sum-sprite" class="sprite s2" alt="" />
+        <div id="sum-body" class="sum-body"></div>
+        <button class="pbtn" id="sum-close">CANCEL</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
