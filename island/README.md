@@ -27,8 +27,8 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 - After a catch or a flee, the throw closes and the overworld is free again.
 - Every button, glyph, silhouette, and ball is drawn on the same 4× Game Boy grid as the map. There is no separate CSS overlay. The title screen wraps the full fan disclaimer. The play screen does not.
 - The ocean cycles the original Red water tile: overworld tile `$14` scrolls one pixel every 20 frames, right for four steps and left for four, the same bob as `UpdateMovingBgTiles`. The coastline is that stair-step cliff lip (overworld tile 49) turned to meet every water edge, including corners.
-- A catch plays the Red catch jingle and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). **DEX** opens it. **SND** mutes Pallet Town and the Red effects (`pogo-island-mute`). The first tap unlocks audio, including on iOS.
-- The title is a Red-style landing: **POKEMON ISLAND**, Red's portrait, and a menu box along the bottom. With no save it shows **NEW GAME** and **OPTION**. After a visit, **CONTINUE** is added. **OPTION** toggles sound. There is no battle entry on the island. The root battle demo stays a separate page. The play HUD is **DEX**, the caught count, and **SND**.
+- A catch plays the Red catch jingle and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). **DEX** opens it. **PAUSE** in the upper right freezes the island and opens the settings menu: volume, monochrome or Pokémon Red Color graphics, save, and return to the home menu. Volume and graphics are written to `pogo-island-save` immediately. **SAVE** also stores the party, the caught list, and Red's position, then shows a short text box. The first tap unlocks audio, including on iOS.
+- The title is a Red-style landing: **POKEMON ISLAND**, Red's portrait, and a menu box along the bottom. With no save it shows **NEW GAME**. After a visit or a save, **CONTINUE** is added and restores the saved position and party. Sound and graphics live in the pause menu, not on the title. There is no battle entry on the island. The root battle demo stays a separate page. The play HUD is **DEX**, the caught count, and **PAUSE**.
 
 ## Biome → type
 
@@ -73,7 +73,7 @@ The live demo loads this folder for the overworld. See `assets/red/README.md`.
 
 `tiles/pokecenter.png` and `tiles/reds_house.png` load with the Red set. Indoor rooms are not drawn on the island. Bulbasaur stays the brother's sprite. The other encounter fronts are PokeAPI Generation I Red/Blue.
 
-The overworld uses only the four Pokémon Red DMG grays (`#f8f8f8`, `#a8a8a8`, `#585858`, `#080808`): white, light gray, dark gray, and black. Dialogue, signs, the home menu, and the option box use the pret Red font (`gfx/font/font.png`) at one tile per letter, inside the `$79`–`$7e` text-box border. Pixels stay on that grid: integer 4× scale, nearest-neighbor, no color multiply.
+The overworld starts in the four Pokémon Red DMG grays (`#f8f8f8`, `#a8a8a8`, `#585858`, `#080808`): white, light gray, dark gray, and black. **PAUSE → GFX COLOR** switches to a Game Boy Color Red set: green fields, tan paths, red roofs, blue water, and a red hat and Poké Ball, with wild sprites quantized to GBC's 5-bit color. Text boxes stay the black-and-white `$79`–`$7e` border and the pret font in both modes. Pixels stay on that grid: integer 4× scale, nearest-neighbor, no color multiply.
 
 > Unofficial fan project. Pokémon Red graphics are Nintendo / Game Freak / The Pokémon Company intellectual property. Not affiliated with them.
 

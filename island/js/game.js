@@ -98,12 +98,19 @@
   const PAPER = '#f8f8f8';
   const MID = '#a8a8a8';
   const SHADE = '#585858';
+  /* Catch ring. Mono stays on the four grays. Color uses a GBC red. */
+  let RING_TIGHT = INK;
+  let RING_MID = SHADE;
+  let RING_OPEN = MID;
   /* Thrown ball is 32×32 GB px (2× the 16×16 sheet at 4×) so a phone flick can grab it. */
   const BALL = 32 * PX;
 
   let ready = false;
-  let titlePage = 'main';
   const SEEN_KEY = 'pogo-island-seen';
+  const SAVE_KEY = 'pogo-island-save';
+  let graphicsMode = 'mono';
+  let pausedMode = 'explore';
+  let saveNote = false;
   let bootError = false;
   let redPic = null;
   let ballCanvas = null;
@@ -676,7 +683,11 @@
     if (!ready) return;
     const p = canvasPoint(e);
     const id = hitAt(p[0], p[1]);
-    if (state.mode === 'title' || state.mode === 'dex' || state.mode === 'sign') {
+    if (id === 'pause' && state.mode !== 'title') {
+      ui.press = 'pause';
+      return;
+    }
+    if (state.mode === 'title' || state.mode === 'dex' || state.mode === 'sign' || state.mode === 'pause') {
       ui.press = id;
       return;
     }
@@ -713,13 +724,20 @@
   }
   function onPointerUp(e) {
     const p = e ? canvasPoint(e) : null;
-    if (enc.drag) releaseThrow();
+    if (enc.drag && ui.press !== 'pause') releaseThrow();
     if (ui.press && p) {
       const id = hitAt(p[0], p[1]);
       if (id === ui.press) activate(id);
       else if (state.mode === 'sign') closeSign();
+      else if (state.mode === 'pause') {
+        if (saveNote) saveNote = false;
+        else closePause();
+      }
     } else if (state.mode === 'sign') {
       closeSign();
+    } else if (state.mode === 'pause') {
+      if (saveNote) saveNote = false;
+      else closePause();
     } else if (stick.on && p && state.mode === 'explore') {
       const moved = Math.hypot(p[0] - stick.ox, p[1] - stick.oy);
       if (moved < DEAD) {
@@ -1034,19 +1052,26 @@
 
   function drawHud() {
     const y = PX;
-    const narrow = state.viewW < 420;
     const dex = placeButton(PX, y, 'dex', 'DEX');
-    const soundLabel = IslandAudio.isMuted() ? (narrow ? 'MUT' : 'MUTE') : (narrow ? 'SND' : 'SOUND');
-    const sw = buttonSize(soundLabel).w;
-    const sound = placeButton(snap(state.viewW - sw - PX), y, 'sound', soundLabel);
+    const pw = buttonSize('PAUSE').w;
+    const pause = placeButton(snap(state.viewW - pw - PX), y, 'pause', 'PAUSE');
     const count = caughtCount() + '/15';
     const cx = dex.x + dex.w + PX;
-    if (sound.x - cx >= textW(count) + 2 * PX) {
+    const gap = pause.x - cx;
+    let bottom = Math.max(dex.bottom, pause.bottom);
+    if (gap >= textW(count) + 2 * PX) {
       ctx.fillStyle = INK;
       ctx.fillRect(cx, y, textW(count) + 2 * PX, 10 * PX);
       drawText(count, cx + PX, y + PX, PAPER);
+    } else {
+      const cw = textW(count) + 2 * PX;
+      const cy = snap(bottom + PX);
+      ctx.fillStyle = INK;
+      ctx.fillRect(PX, cy, cw, 10 * PX);
+      drawText(count, 2 * PX, cy + PX, PAPER);
+      bottom = cy + 10 * PX;
     }
-    return Math.max(dex.bottom, sound.bottom);
+    return bottom;
   }
 
   function gridSil(src, dw, dh) {
@@ -1214,7 +1239,7 @@
     const minR = snap(Math.max(14 * PX, half * 0.58));
     const maxR = snap(Math.max(minR + 12 * PX, half * 1.02));
     const radius = snap(minR + (maxR - minR) * pulse);
-    ctx.fillStyle = pulse < 0.22 ? INK : pulse < 0.48 ? SHADE : MID;
+    ctx.fillStyle = pulse < 0.22 ? RING_TIGHT : pulse < 0.48 ? RING_MID : RING_OPEN;
     const bands = [0, 2 * PX, 4 * PX];
     const cx = snap(m.x + m.w / 2);
     const cy = snap(m.y + m.h / 2);
@@ -1231,7 +1256,7 @@
 
   function drawTrail(pts, ox, oy) {
     for (let i = 0; i < pts.length; i++) {
-      ctx.fillStyle = i % 2 ? SHADE : INK;
+      ctx.fillStyle = i % 2 ? RING_OPEN : RING_TIGHT;
       const px = snap(pts[i].x + (ox || 0));
       const py = snap(pts[i].y + (oy || 0));
       ctx.fillRect(px, py, PX * 2, PX * 2);
@@ -1362,6 +1387,8 @@
 
   function hasSave() {
     if (caughtCount() > 0) return true;
+    const saved = readSave();
+    if (saved && typeof saved.x === 'number') return true;
     try { return localStorage.getItem(SEEN_KEY) === '1'; } catch (e) { return false; }
   }
   function markSeen() {
@@ -1369,16 +1396,9 @@
   }
   function titleItems() {
     if (!ready) return [];
-    if (titlePage === 'option') {
-      return [
-        { id: 'sound', label: IslandAudio.isMuted() ? 'SOUND OFF' : 'SOUND ON' },
-        { id: 'optdone', label: 'DONE' },
-      ];
-    }
     const items = [];
     if (hasSave()) items.push({ id: 'continue', label: 'CONTINUE' });
     items.push({ id: 'newgame', label: 'NEW GAME' });
-    items.push({ id: 'option', label: 'OPTION' });
     return items;
   }
   function drawCursor(x, y, color) {
@@ -1444,48 +1464,108 @@
     return foot;
   }
 
+  function pauseItems() {
+    return [
+      { id: 'vol', label: IslandAudio.isMuted() ? 'VOL OFF' : 'VOL ON' },
+      { id: 'gfx', label: graphicsMode === 'color' ? 'GFX COLOR' : 'GFX MONO' },
+      { id: 'save', label: 'SAVE' },
+      { id: 'tomain', label: 'MAIN MENU' },
+    ];
+  }
+  function drawPauseMenu() {
+    promptBlink++;
+    const items = pauseItems();
+    const rowH = 10 * PX;
+    const boxW = Math.max(TW * 10, Math.floor(state.viewW / TW) * TW);
+    const wantH = TW * 2 + items.length * rowH;
+    const boxH = Math.ceil(wantH / TW) * TW;
+    const noteH = saveNote ? TW * 3 : 0;
+    const total = boxH + (saveNote ? PX + noteH : 0);
+    let y = snap((state.viewH - total) / 2);
+    if (y < 16 * PX) y = 16 * PX;
+    const x = snap((state.viewW - boxW) / 2);
+    const box = drawRedBox(x, y, boxW, boxH);
+    const rh = Math.max(8 * PX, Math.floor(box.ih / items.length / PX) * PX);
+    const blink = ((promptBlink / 18) | 0) % 2 === 0;
+    for (let i = 0; i < items.length; i++) {
+      const iy = box.iy + i * rh;
+      const pressed = ui.press === items[i].id;
+      const rowHgt = Math.min(rh, box.iy + box.ih - iy);
+      if (pressed) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(box.ix, iy, box.iw, rowHgt);
+      }
+      const color = pressed ? PAPER : INK;
+      const ay = snap(iy + (rowHgt - 8 * PX) / 2);
+      const ax = box.ix;
+      if (i === 0 && blink) drawCursor(ax, ay, color);
+      drawText(items[i].label, ax + ADV * PX, ay, color);
+      ui.hits.push({ id: items[i].id, x: box.x, y: iy, w: box.w, h: rowHgt });
+    }
+    if (!saveNote) return;
+    const nw = Math.min(boxW, TW * 8);
+    const nx = snap((state.viewW - nw) / 2);
+    const ny = snap(y + boxH + PX);
+    const nb = drawRedBox(nx, ny, nw, noteH);
+    const msg = 'SAVED.';
+    drawText(msg, snap(nb.ix + (nb.iw - textW(msg)) / 2 - ADV * PX / 2), nb.iy, INK);
+    if (blink) drawText('▼', nb.ix + nb.iw - ADV * PX, nb.iy, INK);
+  }
+
   function drawPixelUI() {
     ui.hits = [];
     ui.mon = null;
-    if (state.mode !== 'throw') {
+    const paused = state.mode === 'pause';
+    const under = paused ? pausedMode : state.mode;
+    if (under !== 'throw') {
       ui.ballHome = null;
       ui.ballHit = null;
     }
-    if (state.mode === 'title') {
+    if (under === 'title') {
       drawTitle();
       return;
     }
     drawHud();
     const foot = state.viewH;
-    if (state.mode === 'dex') {
-      drawDex(foot);
-      return;
+    if (under === 'dex') drawDex(foot);
+    else if (under === 'throw') drawThrow(foot);
+    else {
+      if (under === 'sign') drawSignBox();
+      if (enc.phase === 'chip' && under === 'explore') drawChip(foot);
+      else if (under === 'explore' && state.moved < 80 && enc.phase !== 'chip') {
+        const msg = 'DRAG TO WALK';
+        const tw = textW(msg);
+        const x = snap((state.viewW - tw) / 2 - 2 * PX);
+        const y = 16 * PX;
+        drawPanel(x, y, tw + 4 * PX, 12 * PX);
+        drawText(msg, x + 2 * PX, y + 2 * PX, INK);
+      }
     }
-    if (state.mode === 'throw') {
-      drawThrow(foot);
-      return;
-    }
-    if (state.mode === 'sign') drawSignBox();
-    if (enc.phase === 'chip' && state.mode === 'explore') drawChip(foot);
-    else if (state.mode === 'explore' && state.moved < 80 && enc.phase !== 'chip') {
-      const msg = 'DRAG TO WALK';
-      const tw = textW(msg);
-      const x = snap((state.viewW - tw) / 2 - 2 * PX);
-      const y = 16 * PX;
-      drawPanel(x, y, tw + 4 * PX, 12 * PX);
-      drawText(msg, x + 2 * PX, y + 2 * PX, INK);
-    }
+    if (!paused) return;
+    const keep = [];
+    for (let i = 0; i < ui.hits.length; i++) if (ui.hits[i].id === 'pause') keep.push(ui.hits[i]);
+    ui.hits = keep;
+    drawPauseMenu();
   }
 
   function activate(id) {
-    if (id === 'newgame' || id === 'continue') { startGame(); return; }
-    if (id === 'option') { titlePage = 'option'; IslandAudio.click(); return; }
-    if (id === 'optdone') { titlePage = 'main'; IslandAudio.click(); return; }
-    if (id === 'sound') {
+    if (id === 'pause') { togglePause(); return; }
+    if (id === 'vol') {
       IslandAudio.toggle();
+      persistSettings();
       IslandAudio.click();
       return;
     }
+    if (id === 'gfx') {
+      setGraphics(graphicsMode === 'color' ? 'mono' : 'color');
+      persistSettings();
+      IslandAudio.click();
+      return;
+    }
+    if (id === 'save') { saveProgress(); IslandAudio.click(); return; }
+    if (id === 'tomain') { returnToMenu(); return; }
+    if (id === 'newgame') { newGame(); return; }
+    if (id === 'continue') { continueGame(); return; }
     if (id === 'dex') {
       if (state.mode === 'sign') closeSign();
       if (state.mode === 'explore') openDex();
@@ -1792,25 +1872,139 @@
       ctx.fillRect(0, 0, state.viewW, state.viewH);
       drawText('ASSET ERROR', 2 * PX, 2 * PX, PAPER);
     } else if (ready && waterFrames) {
-      waterTick++;
-      if (waterTick >= 20) {
-        waterTick = 0;
-        waterFrame = (waterFrame + 1) % waterFrames.length;
+      if (state.mode !== 'pause') {
+        waterTick++;
+        if (waterTick >= 20) {
+          waterTick = 0;
+          waterFrame = (waterFrame + 1) % waterFrames.length;
+        }
+        stepThrow(dt);
+        if (state.mode === 'explore') update(dt);
       }
-      stepThrow(dt);
-      if (state.mode === 'explore') update(dt);
       render();
     }
     requestAnimationFrame(frame);
   }
 
+  function readSave() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      return raw && typeof raw === 'object' ? raw : null;
+    } catch (e) { return null; }
+  }
+  function writeSave(obj) {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); } catch (e) { /* ignore */ }
+  }
+  function caughtIds() {
+    const out = [];
+    const seen = {};
+    dex.forEach(function (id) {
+      if (speciesById[id] && !seen[id]) { seen[id] = 1; out.push(id); }
+    });
+    return out;
+  }
+  function persistSettings() {
+    const prev = readSave() || {};
+    prev.v = 1;
+    prev.volume = IslandAudio.isMuted() ? 'off' : 'on';
+    prev.graphics = graphicsMode;
+    writeSave(prev);
+  }
+  function saveProgress() {
+    const prev = readSave() || {};
+    const ids = caughtIds();
+    prev.v = 1;
+    prev.volume = IslandAudio.isMuted() ? 'off' : 'on';
+    prev.graphics = graphicsMode;
+    prev.party = ids.slice();
+    prev.caught = ids.slice();
+    prev.x = state.x;
+    prev.y = state.y;
+    prev.dir = state.dir;
+    writeSave(prev);
+    saveDex();
+    saveNote = true;
+  }
+  function applyStoredRoster(saved) {
+    const ids = saved && (Array.isArray(saved.caught) ? saved.caught : saved.party);
+    if (!Array.isArray(ids)) return;
+    dex = [];
+    const seen = {};
+    ids.forEach(function (id) {
+      if (speciesById[id] && !seen[id]) { seen[id] = 1; dex.push(id); }
+    });
+    saveDex();
+  }
+  function applyStoredPosition(saved) {
+    if (!saved || typeof saved.x !== 'number' || typeof saved.y !== 'number') return;
+    state.x = saved.x;
+    state.y = saved.y;
+    if (saved.dir === 'up' || saved.dir === 'down' || saved.dir === 'left' || saved.dir === 'right') state.dir = saved.dir;
+  }
+  function resetEncounter() {
+    enc.phase = 'idle';
+    enc.mon = null;
+    enc.tries = 0;
+    enc.spin = 0;
+    enc.curved = false;
+    enc.drag = false;
+    enc.hideMon = false;
+    enc.note = '';
+    enc.trail = [];
+    enc.stars = [];
+    enc.shot = null;
+    enc.grade = '';
+    state.sign = null;
+    state.cooldown = 1.4;
+    stick.on = false;
+    stick.dir = null;
+  }
+  function togglePause() {
+    if (state.mode === 'pause') { closePause(); return; }
+    if (state.mode === 'title' || !ready) return;
+    pausedMode = state.mode;
+    saveNote = false;
+    stick.on = false;
+    stick.dir = null;
+    enc.drag = false;
+    holdCam();
+    state.mode = 'pause';
+    IslandAudio.click();
+  }
+  function closePause() {
+    if (state.mode !== 'pause') return;
+    saveNote = false;
+    holdCam();
+    state.mode = pausedMode || 'explore';
+    IslandAudio.click();
+  }
+  function returnToMenu() {
+    resetEncounter();
+    saveNote = false;
+    pausedMode = 'explore';
+    holdCam();
+    state.mode = 'title';
+    IslandAudio.click();
+  }
+  function continueGame() {
+    const saved = readSave();
+    applyStoredRoster(saved);
+    applyStoredPosition(saved);
+    startGame();
+  }
+  function newGame() {
+    state.x = (CENTER + 0.5) * TILE;
+    state.y = (CENTER + 0.5) * TILE;
+    state.dir = 'down';
+    startGame();
+  }
   function startGame() {
     if (!ready) return;
+    resetEncounter();
     IslandAudio.unlock();
     IslandAudio.startMusic();
     IslandAudio.click();
     markSeen();
-    titlePage = 'main';
     state.mode = 'explore';
     resize();
     holdCam();
@@ -1845,10 +2039,33 @@
     }
   }
 
-  // Original Red DMG grayscale: white, light gray, dark gray, black. No green wash.
+  // Original Red DMG grayscale. Color mode swaps in the SGB / GBC Red sets below.
   const GB = [[248, 248, 248], [168, 168, 168], [88, 88, 88], [8, 8, 8]];
-  const RED_SPRITE = [null, GB[0], GB[2], GB[3]];
-  const RED_PIC = GB;
+  function rgb5(r, g, b) {
+    return [Math.round(r * 255 / 31), Math.round(g * 255 / 31), Math.round(b * 255 / 31)];
+  }
+  /* pret/pokered data/sgb/sgb_palettes.asm, pushed toward the outdoor Red look:
+     light field, grass tuft, shade, outline. Roofs and water are their own sets. */
+  const COLOR_SHEET = {
+    ow: [rgb5(28, 31, 16), rgb5(12, 22, 5), rgb5(5, 12, 3), rgb5(2, 3, 2)],
+    forest: [rgb5(20, 26, 12), rgb5(8, 16, 4), rgb5(3, 8, 2), rgb5(1, 3, 1)],
+    plateau: [rgb5(31, 28, 18), rgb5(22, 14, 8), rgb5(12, 7, 3), rgb5(3, 2, 2)],
+    cavern: [rgb5(28, 22, 16), rgb5(18, 12, 6), rgb5(10, 6, 3), rgb5(3, 2, 2)],
+    port: [rgb5(31, 28, 18), rgb5(20, 16, 10), rgb5(12, 8, 4), rgb5(3, 2, 2)],
+    center: [rgb5(31, 31, 31), rgb5(31, 22, 18), rgb5(26, 6, 4), rgb5(3, 2, 2)],
+    house: [rgb5(31, 31, 31), rgb5(31, 22, 18), rgb5(26, 6, 4), rgb5(3, 2, 2)],
+  };
+  const COLOR_PATH = [rgb5(31, 28, 20), rgb5(24, 18, 10), rgb5(16, 10, 5), rgb5(3, 2, 2)];
+  const COLOR_WATER = [rgb5(24, 31, 31), rgb5(12, 22, 31), rgb5(4, 10, 22), rgb5(1, 3, 8)];
+  const COLOR_ROOF = [rgb5(31, 31, 31), rgb5(31, 24, 20), rgb5(26, 6, 4), rgb5(3, 2, 2)];
+  const ROOF_TILES = [5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 34, 37, 38, 40, 41, 56, 63, 66, 67, 68, 69, 74, 75, 76, 77, 78, 79, 83, 90, 92, 93];
+  const COLOR_RED = [null, [248, 248, 248], rgb5(26, 4, 4), rgb5(3, 2, 2)];
+  const COLOR_PIC = [rgb5(31, 29, 31), rgb5(30, 20, 14), rgb5(26, 4, 4), rgb5(3, 2, 2)];
+  let rawSheets = null;
+  let rawRed = null;
+  let rawPic = null;
+  let rawBall = null;
+  let rawSpecies = null;
 
   function grayIndex(v) {
     if (v >= 212) return 0;
@@ -1980,18 +2197,26 @@
     const im = g.getImageData(0, 0, c.width, c.height);
     const d = im.data;
     const keyWhite = d[0] > 240 && d[1] > 240 && d[2] > 240 && d[3] > 240;
+    const color = graphicsMode === 'color';
     for (let i = 0; i < d.length; i += 4) {
       const nearWhite = d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240;
       if (d[i + 3] < 128 || (keyWhite && nearWhite)) {
         d[i + 3] = 0;
         continue;
       }
-      const lum = (d[i] * 30 + d[i + 1] * 59 + d[i + 2] * 11) / 100;
-      const col = GB[grayIndex(lum)];
-      d[i] = col[0];
-      d[i + 1] = col[1];
-      d[i + 2] = col[2];
-      d[i + 3] = 255;
+      if (color) {
+        d[i] = d[i] & 248;
+        d[i + 1] = d[i + 1] & 248;
+        d[i + 2] = d[i + 2] & 248;
+        d[i + 3] = 255;
+      } else {
+        const lum = (d[i] * 30 + d[i + 1] * 59 + d[i + 2] * 11) / 100;
+        const col = GB[grayIndex(lum)];
+        d[i] = col[0];
+        d[i + 1] = col[1];
+        d[i + 2] = col[2];
+        d[i + 3] = 255;
+      }
     }
     g.putImageData(im, 0, 0);
     return c;
@@ -2026,6 +2251,54 @@
     return out;
   }
 
+  function stampTile(dest, tileCanvas, tid) {
+    const g = dest.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    const x = (tid % 16) * 8;
+    const y = ((tid / 16) | 0) * 8;
+    g.drawImage(tileCanvas, 0, 0, 8, 8, x, y, 8, 8);
+  }
+  function decorateOverworld(sheet) {
+    if (graphicsMode !== 'color' || !rawSheets || !rawSheets.ow) return sheet;
+    function stamp(tid, pal) {
+      stampTile(sheet, paint(sliceTile(rawSheets.ow, tid), pal), tid);
+    }
+    stamp(20, COLOR_WATER);
+    stamp(84, COLOR_WATER);
+    stamp(35, COLOR_PATH);
+    for (let i = 0; i < ROOF_TILES.length; i++) stamp(ROOF_TILES[i], COLOR_ROOF);
+    return sheet;
+  }
+  function applyGraphics() {
+    if (!rawSheets) return;
+    Object.keys(tileBlit).forEach(function (k) { delete tileBlit[k]; });
+    const mono = graphicsMode !== 'color';
+    RING_TIGHT = mono ? INK : '#d02018';
+    RING_MID = mono ? SHADE : '#801010';
+    RING_OPEN = mono ? MID : '#f0c040';
+    Object.keys(rawSheets).forEach(function (k) {
+      const pal = mono ? GB : (COLOR_SHEET[k] || COLOR_SHEET.ow);
+      sheets[k] = paint(rawSheets[k], pal);
+    });
+    if (!mono) decorateOverworld(sheets.ow);
+    const redPal = mono ? [null, GB[0], GB[2], GB[3]] : COLOR_RED;
+    const picPal = mono ? GB : COLOR_PIC;
+    playerCanvas = paint(rawRed, redPal);
+    buildWalkFrames();
+    redPic = paint(rawPic, picPal);
+    ballCanvas = paint(rawBall, redPal);
+    buildBallFrames();
+    buildShoreAndWater(sheets.ow);
+    D.species.forEach(function (s, i) {
+      spriteImg[s.id] = keyedSprite(rawSpecies[i]);
+      spriteSil[s.id] = silhouetteOf(spriteImg[s.id]);
+    });
+  }
+  function setGraphics(mode) {
+    graphicsMode = mode === 'color' ? 'color' : 'mono';
+    if (rawSheets) applyGraphics();
+  }
+
   async function boot() {
     buildMap();
     wire();
@@ -2046,20 +2319,18 @@
         loadImage('assets/red/player/red.png'),
         loadImage('assets/red/sprites/poke_ball.png'),
       ], D.species.map(function (s) { return loadImage(s.sprite); })));
-      keys.forEach(function (k, i) { sheets[k] = paint(imgs[i], GB); });
-      // Interior sheets stay loaded with the Red set. Outdoor cells do not draw them.
+      rawSheets = {};
+      keys.forEach(function (k, i) { rawSheets[k] = imgs[i]; });
+      rawRed = imgs[keys.length];
+      rawPic = imgs[keys.length + 1];
+      rawBall = imgs[keys.length + 2];
+      rawSpecies = imgs.slice(keys.length + 3);
+      const saved = readSave();
+      if (saved && (saved.graphics === 'color' || saved.graphics === 'mono')) graphicsMode = saved.graphics;
+      if (saved && saved.volume === 'off') IslandAudio.setMuted(true);
+      else if (saved && saved.volume === 'on') IslandAudio.setMuted(false);
+      applyGraphics();
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
-      playerCanvas = paint(imgs[keys.length], RED_SPRITE);
-      buildWalkFrames();
-      redPic = paint(imgs[keys.length + 1], RED_PIC);
-      ballCanvas = paint(imgs[keys.length + 2], RED_SPRITE);
-      buildBallFrames();
-      buildShoreAndWater(sheets.ow);
-      const speciesImgs = imgs.slice(keys.length + 3);
-      D.species.forEach(function (s, i) {
-        spriteImg[s.id] = keyedSprite(speciesImgs[i]);
-        spriteSil[s.id] = silhouetteOf(spriteImg[s.id]);
-      });
       ready = true;
     } catch (err) {
       console.error(err);
