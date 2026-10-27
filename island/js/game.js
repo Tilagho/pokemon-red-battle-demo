@@ -1,8 +1,9 @@
 /* Pokémon GO Island — overworld, invisible joystick, GO-style flick catch.
-   The world is pret/pokered, colored as four muted Game Boy shades and scaled
-   by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
+   The world is pret/pokered in the four DMG grays (white, light, dark, black),
+   scaled by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
    Encounter chip, signs, buttons, and the throw are drawn on this same pixel grid.
-   No battles, no D-pad. Center → coast is COAST cells at SPEED px/s = 5s. */
+   Dialogue uses the Red font and the $79–$7e text box. No battles, no D-pad.
+   Center → coast is COAST cells at SPEED px/s = 5s. */
 (function () {
   const D = ISLAND_DATA;
   const TILE = D.TILE;
@@ -93,10 +94,10 @@
   /* Opaque backing store. A translucent canvas on iOS composites stale frames. */
   const ctx = canvas.getContext('2d', { alpha: false });
   let DPR = 1;
-  const INK = '#081820';
-  const PAPER = '#e0f8d0';
-  const MID = '#88c070';
-  const SHADE = '#346856';
+  const INK = '#080808';
+  const PAPER = '#f8f8f8';
+  const MID = '#a8a8a8';
+  const SHADE = '#585858';
   /* Thrown ball is 32×32 GB px (2× the 16×16 sheet at 4×) so a phone flick can grab it. */
   const BALL = 32 * PX;
 
@@ -496,7 +497,7 @@
     state.camX = camX;
     state.camY = camY;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#081820';
+    ctx.fillStyle = INK;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     crisp();
@@ -788,67 +789,87 @@
     if ((s && e) || se) stamp(shore.se, 3, 3);
   }
 
-  const FONT = {};
-  function addGlyph(ch, rows) {
-    const bits = [];
-    for (let y = 0; y < 8; y++) {
-      let n = 0;
-      const s = rows[y] || '';
-      for (let x = 0; x < 8; x++) if (s.charAt(x) === '#') n |= 128 >> x;
-      bits.push(n);
-    }
-    FONT[ch] = bits;
-  }
-  const G = {
-    ' ': ['', '', '', '', '', '', '', ''],
-    'A': [' ## ', '#  #', '#  #', '####', '#  #', '#  #', '#  #', ''],
-    'B': ['### ', '#  #', '#  #', '### ', '#  #', '#  #', '### ', ''],
-    'C': [' ###', '#   ', '#   ', '#   ', '#   ', '#   ', ' ###', ''],
-    'D': ['### ', '#  #', '#  #', '#  #', '#  #', '#  #', '### ', ''],
-    'E': ['####', '#   ', '#   ', '### ', '#   ', '#   ', '####', ''],
-    'F': ['####', '#   ', '#   ', '### ', '#   ', '#   ', '#   ', ''],
-    'G': [' ###', '#   ', '#   ', '# ##', '#  #', '#  #', ' ###', ''],
-    'H': ['#  #', '#  #', '#  #', '####', '#  #', '#  #', '#  #', ''],
-    'I': ['###', ' # ', ' # ', ' # ', ' # ', ' # ', '###', ''],
-    'J': ['  ##', '   #', '   #', '   #', '#  #', '#  #', ' ## ', ''],
-    'K': ['#  #', '# # ', '##  ', '#   ', '##  ', '# # ', '#  #', ''],
-    'L': ['#   ', '#   ', '#   ', '#   ', '#   ', '#   ', '####', ''],
-    'M': ['#   #', '## ##', '# # #', '#   #', '#   #', '#   #', '#   #', ''],
-    'N': ['#  #', '## #', '## #', '# ##', '# ##', '#  #', '#  #', ''],
-    'O': [' ## ', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
-    'P': ['### ', '#  #', '#  #', '### ', '#   ', '#   ', '#   ', ''],
-    'Q': [' ## ', '#  #', '#  #', '#  #', '# ##', '#  #', ' ## ', ''],
-    'R': ['### ', '#  #', '#  #', '### ', '# # ', '#  #', '#  #', ''],
-    'S': [' ###', '#   ', '#   ', ' ## ', '   #', '   #', '### ', ''],
-    'T': ['####', ' #  ', ' #  ', ' #  ', ' #  ', ' #  ', ' #  ', ''],
-    'U': ['#  #', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
-    'V': ['#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ' ## ', ''],
-    'W': ['#   #', '#   #', '#   #', '# # #', '# # #', '## ##', '#   #', ''],
-    'X': ['#  #', '#  #', ' ## ', ' ## ', ' ## ', '#  #', '#  #', ''],
-    'Y': ['#  #', '#  #', ' ## ', ' #  ', ' #  ', ' #  ', ' #  ', ''],
-    'Z': ['####', '   #', '  # ', ' #  ', '#   ', '#   ', '####', ''],
-    '0': [' ## ', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
-    '1': [' # ', '## ', ' # ', ' # ', ' # ', ' # ', '###', ''],
-    '2': [' ## ', '#  #', '   #', '  # ', ' #  ', '#   ', '####', ''],
-    '3': ['### ', '   #', '   #', ' ## ', '   #', '   #', '### ', ''],
-    '4': ['#  #', '#  #', '#  #', '####', '   #', '   #', '   #', ''],
-    '5': ['####', '#   ', '#   ', '### ', '   #', '   #', '### ', ''],
-    '6': [' ## ', '#   ', '#   ', '### ', '#  #', '#  #', ' ## ', ''],
-    '7': ['####', '   #', '  # ', '  # ', ' #  ', ' #  ', ' #  ', ''],
-    '8': [' ## ', '#  #', '#  #', ' ## ', '#  #', '#  #', ' ## ', ''],
-    '9': [' ## ', '#  #', '#  #', ' ###', '   #', '   #', ' ## ', ''],
-    '.': ['', '', '', '', '', '##', '##', ''],
-    ',': ['', '', '', '', ' #', ' #', '# ', ''],
-    '!': [' # ', ' # ', ' # ', ' # ', '   ', ' # ', ' # ', ''],
-    '?': [' ## ', '#  #', '   #', '  # ', ' #  ', '    ', ' #  ', ''],
-    "'": [' # ', ' # ', '#  ', '', '', '', '', ''],
-    '/': ['   #', '   #', '  # ', '  # ', ' #  ', ' #  ', '#   ', ''],
-    '-': ['', '', '', '###', '', '', '', ''],
-    ':': ['', ' # ', ' # ', '', ' # ', ' # ', '', ''],
+  /* pret/pokered gfx/font/font.png. Tile index is the charmap byte minus $80.
+     Advance is one full 8px tile, the same spacing as Red's text boxes. */
+  const FONT = {
+    ' ': [0, 0, 0, 0, 0, 0, 0, 0],
+    'A': [16, 40, 40, 68, 124, 130, 130, 0],
+    'B': [248, 132, 132, 252, 130, 130, 252, 0],
+    'C': [60, 66, 128, 128, 128, 66, 60, 0],
+    'D': [248, 132, 130, 130, 130, 132, 248, 0],
+    'E': [254, 128, 128, 252, 128, 128, 254, 0],
+    'F': [254, 128, 128, 252, 128, 128, 128, 0],
+    'G': [60, 66, 128, 158, 130, 66, 60, 0],
+    'H': [130, 130, 130, 254, 130, 130, 130, 0],
+    'I': [124, 16, 16, 16, 16, 16, 124, 0],
+    'J': [126, 8, 8, 8, 136, 136, 112, 0],
+    'K': [132, 136, 144, 176, 200, 132, 130, 0],
+    'L': [128, 128, 128, 128, 128, 128, 254, 0],
+    'M': [130, 198, 170, 146, 130, 130, 130, 0],
+    'N': [130, 194, 162, 146, 138, 134, 130, 0],
+    'O': [56, 68, 130, 130, 130, 68, 56, 0],
+    'P': [252, 130, 130, 252, 128, 128, 128, 0],
+    'Q': [56, 68, 130, 130, 138, 68, 58, 0],
+    'R': [252, 130, 130, 252, 136, 132, 130, 0],
+    'S': [120, 132, 128, 124, 2, 130, 124, 0],
+    'T': [254, 16, 16, 16, 16, 16, 16, 0],
+    'U': [130, 130, 130, 130, 130, 66, 62, 0],
+    'V': [130, 130, 68, 68, 40, 40, 16, 0],
+    'W': [130, 146, 170, 170, 198, 198, 130, 0],
+    'X': [198, 68, 40, 16, 40, 68, 198, 0],
+    'Y': [130, 68, 40, 16, 16, 16, 16, 0],
+    'Z': [254, 4, 8, 16, 32, 64, 254, 0],
+    'a': [0, 0, 56, 4, 60, 68, 62, 0],
+    'b': [64, 64, 64, 124, 66, 66, 124, 0],
+    'c': [0, 0, 60, 66, 64, 66, 60, 0],
+    'd': [2, 2, 2, 62, 66, 66, 62, 0],
+    'e': [0, 0, 60, 66, 126, 64, 62, 0],
+    'f': [12, 18, 16, 126, 16, 16, 16, 0],
+    'g': [0, 0, 62, 66, 66, 62, 2, 124],
+    'h': [64, 64, 64, 120, 68, 68, 68, 0],
+    'i': [0, 16, 0, 16, 16, 16, 16, 0],
+    'j': [0, 8, 0, 8, 8, 8, 8, 48],
+    'k': [64, 64, 70, 88, 96, 88, 70, 0],
+    'l': [16, 16, 16, 16, 16, 16, 16, 0],
+    'm': [0, 0, 236, 146, 146, 146, 146, 0],
+    'n': [0, 0, 60, 34, 34, 34, 34, 0],
+    'o': [0, 0, 60, 66, 66, 66, 60, 0],
+    'p': [0, 0, 124, 66, 66, 124, 64, 64],
+    'q': [0, 0, 62, 66, 66, 62, 2, 2],
+    'r': [0, 0, 78, 80, 96, 64, 64, 0],
+    's': [0, 0, 60, 64, 60, 2, 124, 0],
+    't': [0, 16, 124, 16, 16, 16, 12, 0],
+    'u': [0, 0, 68, 68, 68, 68, 60, 0],
+    'v': [0, 0, 68, 68, 68, 40, 16, 0],
+    'w': [0, 0, 130, 146, 146, 170, 68, 0],
+    'x': [0, 0, 196, 40, 16, 40, 70, 0],
+    'y': [0, 0, 68, 68, 68, 60, 4, 120],
+    'z': [0, 0, 126, 4, 24, 32, 126, 0],
+    '0': [0, 56, 76, 198, 198, 100, 56, 0],
+    '1': [0, 24, 56, 24, 24, 24, 126, 0],
+    '2': [0, 124, 198, 14, 120, 224, 254, 0],
+    '3': [0, 126, 12, 56, 6, 198, 124, 0],
+    '4': [0, 28, 60, 108, 204, 254, 12, 0],
+    '5': [0, 252, 192, 252, 6, 198, 124, 0],
+    '6': [0, 124, 192, 252, 198, 198, 124, 0],
+    '7': [0, 254, 198, 12, 24, 48, 48, 0],
+    '8': [0, 124, 198, 124, 198, 198, 124, 0],
+    '9': [0, 124, 198, 198, 126, 6, 124, 0],
+    '(': [6, 8, 16, 16, 16, 8, 6, 0],
+    ')': [192, 32, 16, 16, 16, 32, 192, 0],
+    ':': [0, 24, 24, 0, 0, 24, 24, 0],
+    ';': [0, 24, 24, 0, 24, 24, 8, 16],
+    '\'': [96, 96, 32, 64, 0, 0, 0, 0],
+    '-': [0, 0, 0, 0, 126, 0, 0, 0],
+    '?': [0, 126, 231, 206, 24, 0, 24, 24],
+    '!': [24, 60, 60, 60, 24, 0, 24, 24],
+    '.': [0, 0, 0, 0, 0, 96, 96, 0],
+    '▶': [0, 96, 112, 120, 124, 120, 112, 96],
+    '▼': [0, 254, 254, 124, 56, 16, 0, 0],
+    '/': [0, 2, 4, 8, 16, 32, 64, 128],
+    ',': [0, 0, 0, 0, 96, 96, 32, 64],
   };
-  Object.keys(G).forEach(function (ch) { addGlyph(ch, G[ch]); });
-
-  const ADV = 6;
+  const ADV = 8;
 
   function textW(text) { return text.length * ADV * PX; }
   function textWAt(text, scale) { return text.length * ADV * PX * (scale || 1); }
@@ -1000,14 +1021,14 @@
   const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
 
   function drawFooter() {
-    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
+    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - PX));
     const h = (lines.length * 8 + 2) * PX;
     const y = snap(state.viewH - h);
     ctx.fillStyle = INK;
     ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
     ctx.fillStyle = PAPER;
     ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], PX, y + PX + i * 8 * PX, INK);
     return y;
   }
 
@@ -1112,7 +1133,7 @@
     const w = Math.max(TW * 3, Math.floor(state.viewW / TW) * TW);
     const x = snap((state.viewW - w) / 2);
     const flat = [];
-    const limit = w - 2 * TW - 2 * PX;
+    const limit = w - 2 * TW - ADV * PX;
     for (let i = 0; i < s.lines.length; i++) {
       const wrapped = wrapLines(s.lines[i], limit);
       for (let k = 0; k < wrapped.length; k++) flat.push(wrapped[k]);
@@ -1121,14 +1142,9 @@
     let y = snap(state.viewH - h - PX);
     if (y < 14 * PX) y = 14 * PX;
     const box = drawRedBox(x, y, w, h);
-    for (let i = 0; i < flat.length; i++) drawText(flat[i], box.ix + PX, box.iy + i * 8 * PX, INK);
+    for (let i = 0; i < flat.length; i++) drawText(flat[i], box.ix, box.iy + i * 8 * PX, INK);
     if (((promptBlink / 18) | 0) % 2 === 0) {
-      const ax = box.x + box.w - TW + 2 * PX;
-      const ay = box.y + box.h - TW + 3 * PX;
-      ctx.fillStyle = INK;
-      ctx.fillRect(ax, ay, PX, PX);
-      ctx.fillRect(ax - PX, ay + PX, 3 * PX, PX);
-      ctx.fillRect(ax, ay + 2 * PX, PX, PX);
+      drawText('▼', box.ix + box.iw - ADV * PX, box.iy + (flat.length - 1) * 8 * PX, INK);
     }
   }
 
@@ -1198,7 +1214,7 @@
     const minR = snap(Math.max(14 * PX, half * 0.58));
     const maxR = snap(Math.max(minR + 12 * PX, half * 1.02));
     const radius = snap(minR + (maxR - minR) * pulse);
-    ctx.fillStyle = pulse < 0.22 ? '#e03030' : pulse < 0.48 ? INK : MID;
+    ctx.fillStyle = pulse < 0.22 ? INK : pulse < 0.48 ? SHADE : MID;
     const bands = [0, 2 * PX, 4 * PX];
     const cx = snap(m.x + m.w / 2);
     const cy = snap(m.y + m.h / 2);
@@ -1215,7 +1231,7 @@
 
   function drawTrail(pts, ox, oy) {
     for (let i = 0; i < pts.length; i++) {
-      ctx.fillStyle = i % 2 ? '#f8f8f8' : '#e03030';
+      ctx.fillStyle = i % 2 ? SHADE : INK;
       const px = snap(pts[i].x + (ox || 0));
       const py = snap(pts[i].y + (oy || 0));
       ctx.fillRect(px, py, PX * 2, PX * 2);
@@ -1366,18 +1382,12 @@
     return items;
   }
   function drawCursor(x, y, color) {
-    ctx.fillStyle = color;
-    const rows = [0x80, 0xc0, 0xe0, 0xf0, 0xe0, 0xc0, 0x80];
-    for (let r = 0; r < rows.length; r++) {
-      for (let c = 0; c < 4; c++) {
-        if (rows[r] & (128 >> c)) ctx.fillRect(x + c * PX, y + r * PX, PX, PX);
-      }
-    }
+    drawText('▶', x, y, color);
   }
   function drawTitleMenu(foot) {
     const items = titleItems();
     if (!items.length) return;
-    const rowH = 12 * PX;
+    const rowH = 10 * PX;
     const wantH = TW * 2 + items.length * rowH;
     const boxH = Math.ceil(wantH / TW) * TW;
     const boxW = Math.max(TW * 10, Math.floor((state.viewW - 2 * PX) / TW) * TW);
@@ -1396,9 +1406,9 @@
       }
       const color = pressed ? PAPER : INK;
       const ay = snap(iy + (rowHgt - 8 * PX) / 2);
-      const ax = box.ix + PX;
+      const ax = box.ix;
       if (i === 0 && blink) drawCursor(ax, ay, color);
-      drawText(items[i].label, ax + 6 * PX, ay, color);
+      drawText(items[i].label, ax + ADV * PX, ay, color);
       ui.hits.push({ id: items[i].id, x: box.x, y: iy, w: box.w, h: rowHgt });
     }
   }
@@ -1408,7 +1418,7 @@
     const foot = drawFooter();
     promptBlink++;
     const items = titleItems();
-    const rowH = 12 * PX;
+    const rowH = 10 * PX;
     const menuH = items.length ? Math.ceil((TW * 2 + items.length * rowH) / TW) * TW : 0;
     const menuTop = foot - menuH;
     let y = 2 * PX;
@@ -1835,10 +1845,10 @@
     }
   }
 
-  // Four muted DMG shades. Every overworld pixel is one of these — no tint blend.
-  const GB = [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]];
-  const RED_SPRITE = [null, [248, 248, 248], [224, 48, 48], [16, 16, 16]];
-  const RED_PIC = [[248, 248, 248], [240, 208, 176], [224, 48, 48], [16, 16, 16]];
+  // Original Red DMG grayscale: white, light gray, dark gray, black. No green wash.
+  const GB = [[248, 248, 248], [168, 168, 168], [88, 88, 88], [8, 8, 8]];
+  const RED_SPRITE = [null, GB[0], GB[2], GB[3]];
+  const RED_PIC = GB;
 
   function grayIndex(v) {
     if (v >= 212) return 0;
@@ -1969,12 +1979,21 @@
     g.drawImage(img, 0, 0);
     const im = g.getImageData(0, 0, c.width, c.height);
     const d = im.data;
-    if (d[0] > 240 && d[1] > 240 && d[2] > 240 && d[3] > 240) {
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) d[i + 3] = 0;
+    const keyWhite = d[0] > 240 && d[1] > 240 && d[2] > 240 && d[3] > 240;
+    for (let i = 0; i < d.length; i += 4) {
+      const nearWhite = d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240;
+      if (d[i + 3] < 128 || (keyWhite && nearWhite)) {
+        d[i + 3] = 0;
+        continue;
       }
-      g.putImageData(im, 0, 0);
+      const lum = (d[i] * 30 + d[i + 1] * 59 + d[i + 2] * 11) / 100;
+      const col = GB[grayIndex(lum)];
+      d[i] = col[0];
+      d[i + 1] = col[1];
+      d[i + 2] = col[2];
+      d[i + 3] = 255;
     }
+    g.putImageData(im, 0, 0);
     return c;
   }
   function silhouetteOf(src) {
@@ -1988,7 +2007,7 @@
     let minX = c.width, minY = c.height, maxX = -1, maxY = -1;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] < 16) continue;
-      d[i] = 8; d[i + 1] = 24; d[i + 2] = 32; d[i + 3] = 255;
+      d[i] = GB[3][0]; d[i + 1] = GB[3][1]; d[i + 2] = GB[3][2]; d[i + 3] = 255;
       const p = i / 4;
       const x = p % c.width;
       const y = (p / c.width) | 0;
