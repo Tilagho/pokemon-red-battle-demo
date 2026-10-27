@@ -111,6 +111,8 @@ tools/make_placeholders.py    regenerates the placeholder sprites (Python + Pill
 
 New attack visuals and sound are original to this demo: procedural pixel drawing in `js/fx.js` and Web Audio synthesis in `js/audio.js`. No Nintendo ROM banks, effect sheets, or game audio were copied. They are bundled as code, so GitHub Pages does not depend on a third-party host.
 
+Pokémon Red overworld graphics (Nintendo IP via pret/pokered) live under [`island/assets/red/`](island/assets/red/README.md) as an authentic/internal reference and are not served by the live demo.
+
 | Asset | Source | License |
 | --- | --- | --- |
 | Attack VFX | Written for this demo (`js/fx.js`) | Same terms as this project; original code |
