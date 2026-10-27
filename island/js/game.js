@@ -242,7 +242,7 @@
   function placeSign(x, y, lines) {
     if (!inMap(x, y)) return;
     if (biome[y][x] === 'water' || biome[y][x] === 'path') return;
-    blocked[idx(x, y)] = 1;
+    // The board is not a wall. Only the post blocks; see feetBlocked.
     signs.push({ x: x, y: y, lines: lines });
   }
 
@@ -298,6 +298,10 @@
     console.assert(!walkable(16, 15), 'house window');
     console.assert(walkable(15, 17), 'approach the house');
     console.assert(signs.length === 4, 'every building has a sign');
+    const houseSign = signLayout(signs[0]);
+    console.assert(feetBlocked(houseSign.post.x + houseSign.post.w / 2, houseSign.post.y + houseSign.post.h / 2), 'sign post blocks');
+    console.assert(!feetBlocked(signs[0].x * TILE + TILE / 2, signs[0].y * TILE + PX), 'north side of a sign is walkable');
+    console.assert(!feetBlocked(houseSign.x + 8 * PX, houseSign.y + 8 * PX), 'sign board does not block');
   }
 
   function walkable(x, y) {
@@ -323,7 +327,7 @@
     if (!dx && !dy) return false;
     const nx = state.x + dx;
     const ny = state.y + dy;
-    if (!walkable(Math.floor(nx / TILE), Math.floor(ny / TILE))) return false;
+    if (feetBlocked(nx, ny)) return false;
     state.x = nx;
     state.y = ny;
     return true;
@@ -531,9 +535,10 @@
       if (f.x < x0 - 1 || f.y < y0 - 1 || f.x > x1 + 1 || f.y > y1 + 1) continue;
       drawBlock('ow', BLOCKS.ow.flowers, Math.round(f.x * TILE + ox), Math.round(f.y * TILE + oy));
     }
-    /* Trees, rocks, houses, and signs are background blocks, same as pret.
-       Red is a sprite, so he paints after them. Sorting a whole tree block
-       against his feet covered the half of him that overlaps the trunk. */
+    /* Trees, rocks, and houses are solid blocks. Red paints after them.
+       Sorting a whole tree block against his feet covered the half of him
+       that overlaps the trunk. Signs are sprites: the post sorts with his
+       feet, and the board stays in front when he stands south of it. */
     const propsDraw = [];
     for (let i = 0; i < props.length; i++) {
       const p = props[i];
@@ -545,12 +550,21 @@
       const p = propsDraw[i];
       drawBlock(p.sheet, p.block, Math.round(p.x * TILE + ox), Math.round(p.y * TILE + oy));
     }
+    const signDraw = [];
     for (let i = 0; i < signs.length; i++) {
       const s = signs[i];
       if (s.x < x0 - 1 || s.y < y0 - 1 || s.x > x1 + 1 || s.y > y1 + 1) continue;
-      drawSignPost(s, ox, oy);
+      signDraw.push(s);
+    }
+    signDraw.sort(function (a, b) { return signLayout(a).base - signLayout(b).base; });
+    for (let i = 0; i < signDraw.length; i++) {
+      if (signLayout(signDraw[i]).base <= state.y) drawSignGraphic(signDraw[i], ox, oy, 'post');
     }
     drawPlayer();
+    for (let i = 0; i < signDraw.length; i++) {
+      const base = signLayout(signDraw[i]).base;
+      drawSignGraphic(signDraw[i], ox, oy, base <= state.y ? 'face' : 'all');
+    }
     drawPixelUI();
   }
 
@@ -574,14 +588,50 @@
     ctx.drawImage(img, dx, dy, dw, dh);
   }
 
-  function drawSignPost(s, ox, oy) {
+  /* Sign tiles 70, 71, 86, 87 are a 16×16 board with the post on the lower right.
+     The board's footprint does not collide. The post does. */
+  function signLayout(s) {
+    const step = TILE / 4;
+    const x = s.x * TILE + (TILE - 2 * step) / 2;
+    const y = s.y * TILE + step;
+    const w = 2 * step;
+    const h = 2 * step;
+    const faceH = 12 * PX;
+    return {
+      x: x,
+      y: y,
+      w: w,
+      h: h,
+      faceH: faceH,
+      post: { x: x + 10 * PX, y: y + faceH, w: 6 * PX, h: 4 * PX },
+      base: y + h,
+    };
+  }
+  function feetBlocked(px, py) {
+    if (!walkable(Math.floor(px / TILE), Math.floor(py / TILE))) return true;
+    for (let i = 0; i < signs.length; i++) {
+      const p = signLayout(signs[i]).post;
+      if (px >= p.x && py >= p.y && px < p.x + p.w && py < p.y + p.h) return true;
+    }
+    return false;
+  }
+  function drawSignGraphic(s, ox, oy, part) {
+    const lay = signLayout(s);
+    const dx = Math.round(lay.x + ox);
+    const dy = Math.round(lay.y + oy);
     const step = TILE / 4;
     const tiles = [70, 71, 86, 87];
-    const dx = Math.round(s.x * TILE + ox + (TILE - 2 * step) / 2);
-    const dy = Math.round(s.y * TILE + oy + step);
+    ctx.save();
+    if (part === 'face' || part === 'post') {
+      ctx.beginPath();
+      if (part === 'face') ctx.rect(dx, dy, lay.w, lay.faceH);
+      else ctx.rect(dx, dy + lay.faceH, lay.w, lay.h - lay.faceH);
+      ctx.clip();
+    }
     for (let i = 0; i < 4; i++) {
       drawSheetTile('ow', tiles[i], dx + (i % 2) * step, dy + ((i / 2) | 0) * step);
     }
+    ctx.restore();
   }
 
   let lastTileStep = CENTER + CENTER * MAP;
@@ -925,8 +975,8 @@
     }
   }
 
-  function wrapLines(text, maxW) {
-    const maxChars = Math.max(1, Math.floor(maxW / (ADV * PX)));
+  function wrapLines(text, maxW, px) {
+    const maxChars = Math.max(1, Math.floor(maxW / (ADV * (px || PX))));
     const words = String(text).split(' ');
     const lines = [];
     let cur = '';
@@ -1002,12 +1052,85 @@
   };
   const TW = 8 * PX;
 
-  function drawBoxTile(bits, x, y) {
-    ctx.fillStyle = INK;
+  function boxGrid(bits) {
+    const g = [];
     for (let row = 0; row < 8; row++) {
-      const b = bits[row];
-      for (let col = 0; col < 8; col++) {
-        if (b & (128 >> col)) ctx.fillRect(x + col * PX, y + row * PX, PX, PX);
+      const line = [];
+      for (let col = 0; col < 8; col++) line.push((bits[row] & (128 >> col)) ? 1 : 0);
+      g.push(line);
+    }
+    return g;
+  }
+  function flipH(g) {
+    const o = [];
+    for (let y = 0; y < 8; y++) {
+      const row = [];
+      for (let x = 0; x < 8; x++) row.push(g[y][7 - x]);
+      o.push(row);
+    }
+    return o;
+  }
+  function flipV(g) {
+    const o = [];
+    for (let y = 0; y < 8; y++) o.push(g[7 - y].slice());
+    return o;
+  }
+  /* 0 clear, 1 paper, 2 ink. Clear pixels are the ones connected to the outside
+     of the frame, so the map or the title background shows through the corners.
+     The gap between the double lines and the text area stay paper. */
+  function boxPaint(g, seeds) {
+    const outside = [];
+    for (let y = 0; y < 8; y++) outside.push([0, 0, 0, 0, 0, 0, 0, 0]);
+    const st = seeds.slice();
+    while (st.length) {
+      const p = st.pop();
+      const x = p[0], y = p[1];
+      if (x < 0 || y < 0 || x > 7 || y > 7 || outside[y][x] || g[y][x]) continue;
+      outside[y][x] = 1;
+      st.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+    const paint = [];
+    for (let y = 0; y < 8; y++) {
+      const row = [];
+      for (let x = 0; x < 8; x++) {
+        if (g[y][x]) row.push(2);
+        else if (outside[y][x]) row.push(0);
+        else row.push(1);
+      }
+      paint.push(row);
+    }
+    return paint;
+  }
+  const BOX_TILE = (function () {
+    const tl = boxGrid(BOX.tl);
+    const t = boxGrid(BOX.t);
+    const tr = boxGrid(BOX.tr);
+    const v = boxGrid(BOX.v);
+    const bl = boxGrid(BOX.bl);
+    const br = boxGrid(BOX.br);
+    return {
+      tl: boxPaint(tl, [[0, 0]]),
+      t: boxPaint(t, [[0, 0], [7, 0]]),
+      tr: boxPaint(tr, [[7, 0]]),
+      l: boxPaint(v, [[0, 0], [0, 7]]),
+      r: boxPaint(flipH(v), [[7, 0], [7, 7]]),
+      bl: boxPaint(bl, [[0, 7]]),
+      b: boxPaint(flipV(t), [[0, 7], [7, 7]]),
+      br: boxPaint(br, [[7, 7]]),
+    };
+  })();
+
+  function drawBoxPaint(paint, x, y) {
+    for (let row = 0; row < 8; row++) {
+      let col = 0;
+      while (col < 8) {
+        const p = paint[row][col];
+        if (!p) { col++; continue; }
+        let end = col + 1;
+        while (end < 8 && paint[row][end] === p) end++;
+        ctx.fillStyle = p === 2 ? INK : PAPER;
+        ctx.fillRect(x + col * PX, y + row * PX, (end - col) * PX, PX);
+        col = end;
       }
     }
   }
@@ -1017,20 +1140,24 @@
     h = Math.max(TW * 3, Math.ceil(h / TW) * TW);
     x = snap(x);
     y = snap(y);
-    ctx.fillStyle = PAPER;
-    ctx.fillRect(x, y, w, h);
     const cols = w / TW;
     const rows = h / TW;
+    if (w > 2 * TW && h > 2 * TW) {
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(x + TW, y + TW, w - 2 * TW, h - 2 * TW);
+    }
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        let bits = null;
-        if (r === 0 && c === 0) bits = BOX.tl;
-        else if (r === 0 && c === cols - 1) bits = BOX.tr;
-        else if (r === rows - 1 && c === 0) bits = BOX.bl;
-        else if (r === rows - 1 && c === cols - 1) bits = BOX.br;
-        else if (r === 0 || r === rows - 1) bits = BOX.t;
-        else if (c === 0 || c === cols - 1) bits = BOX.v;
-        if (bits) drawBoxTile(bits, x + c * TW, y + r * TW);
+        let key = null;
+        if (r === 0 && c === 0) key = 'tl';
+        else if (r === 0 && c === cols - 1) key = 'tr';
+        else if (r === rows - 1 && c === 0) key = 'bl';
+        else if (r === rows - 1 && c === cols - 1) key = 'br';
+        else if (r === 0) key = 't';
+        else if (r === rows - 1) key = 'b';
+        else if (c === 0) key = 'l';
+        else if (c === cols - 1) key = 'r';
+        if (key) drawBoxPaint(BOX_TILE[key], x + c * TW, y + r * TW);
       }
     }
     return { x: x, y: y, w: w, h: h, ix: x + TW, iy: y + TW, iw: w - 2 * TW, ih: h - 2 * TW };
@@ -1039,15 +1166,16 @@
   const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
 
   function drawFooter() {
-    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - PX));
-    const h = (lines.length * 8 + 2) * PX;
-    const y = snap(state.viewH - h);
-    ctx.fillStyle = INK;
-    ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
-    ctx.fillStyle = PAPER;
-    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], PX, y + PX + i * 8 * PX, INK);
-    return y;
+    const px = 2;
+    const lines = wrapLines(LEGAL, Math.max(8 * px, state.viewW - 2 * PX), px);
+    const lineH = 8 * px + px;
+    const blockH = lines.length * lineH;
+    const y = snap(state.viewH - blockH - PX);
+    for (let i = 0; i < lines.length; i++) {
+      const tw = lines[i].length * ADV * px;
+      drawTextAt(lines[i], snap((state.viewW - tw) / 2), y + i * lineH, PAPER, px / PX);
+    }
+    return y - PX;
   }
 
   function drawHud() {
