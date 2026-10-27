@@ -23,7 +23,7 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 - Town buildings use Pallet and Viridian exteriors from the pret overworld blockset: Red's house, the Fighting Dojo, the Pokémon Center, and the Pokémon Mart. Each has a signpost. Walk up to it and tap the sign, or face it and tap, to open a text box drawn with the Red border tiles (`$79`–`$7e`).
 - Stepping through tall grass, forest, shore, and the other encounter biomes can start a wild encounter. It is not every step: a short warmup, then a per-tile roll, then a few seconds of quiet after each encounter.
 - An encounter does **not** move Red or the camera. His world position and screen position stay on the same pixels when the chip opens and when it closes. The chip — silhouette, **Back away**, and **Catch!** — is a Red text box in the lower band under him. Dragging still walks. Walking about three blocks away dismisses the chip, same as Back away. The Pokémon can show up again later under the same cooldown.
-- **Catch!** opens the throw. A pixel ring around the wild Pokémon shrinks and swells. A tighter ring (it turns red) is the better catch window. The Poké Ball is 32×32 Game Boy pixels, twice the old 16×16, so it is easy to grab. Flick it upward. Swirl before the flick and the ball takes a wide curve, then still lands — spin is a trick, not a miss. Only a tiny twitch (too short) or a violent swipe (too long) misses. A straight throw homes in on a smaller arc. Curve and a tight ring both raise the catch rate. Misses, break-outs, and catches use the same flee rules as before: three failures can send it running, and the fourth always does.
+- **Catch!** opens the throw. A pixel ring around the wild Pokémon shrinks and swells. A tighter ring (it turns black) is the better catch window. The Poké Ball is 32×32 Game Boy pixels, twice the old 16×16, so it is easy to grab. Flick it upward. Swirl before the flick and the ball takes a wide curve, then still lands — spin is a trick, not a miss. Only a tiny twitch (too short) or a violent swipe (too long) misses. A straight throw homes in on a smaller arc. Curve and a tight ring both raise the catch rate. Misses, break-outs, and catches use the same flee rules as before: three failures can send it running, and the fourth always does.
 - After a catch or a flee, the throw closes and the overworld is free again.
 - Every button, glyph, silhouette, and ball is drawn on the same 4× Game Boy grid as the map. There is no separate CSS overlay. The title screen wraps the full fan disclaimer. The play screen does not.
 - The ocean cycles the original Red water tile: overworld tile `$14` scrolls one pixel every 20 frames, right for four steps and left for four, the same bob as `UpdateMovingBgTiles`. The coastline is that stair-step cliff lip (overworld tile 49) turned to meet every water edge, including corners.
@@ -73,7 +73,7 @@ The live demo loads this folder for the overworld. See `assets/red/README.md`.
 
 `tiles/pokecenter.png` and `tiles/reds_house.png` load with the Red set. Indoor rooms are not drawn on the island. Bulbasaur stays the brother's sprite. The other encounter fronts are PokeAPI Generation I Red/Blue.
 
-The overworld uses only the four muted Game Boy greens (`#e0f8d0`, `#88c070`, `#346856`, `#081820`). Pixels stay on that grid: integer 4× scale, nearest-neighbor, no color multiply.
+The overworld uses only the four Pokémon Red DMG grays (`#f8f8f8`, `#a8a8a8`, `#585858`, `#080808`): white, light gray, dark gray, and black. Dialogue, signs, the home menu, and the option box use the pret Red font (`gfx/font/font.png`) at one tile per letter, inside the `$79`–`$7e` text-box border. Pixels stay on that grid: integer 4× scale, nearest-neighbor, no color multiply.
 
 > Unofficial fan project. Pokémon Red graphics are Nintendo / Game Freak / The Pokémon Company intellectual property. Not affiliated with them.
 
@@ -84,8 +84,9 @@ The overworld uses only the four muted Game Boy greens (`#e0f8d0`, `#88c070`, `#
 | Overworld tiles, Red walk, Red pic, Poké Ball | [pret/pokered](https://github.com/pret/pokered) `gfx/` in `assets/red/` | Nintendo IP. Fan demo only. Tiago approved committing these files |
 | Pallet Town theme, UI chirp, throw, shake, catch, flee, bump | [pret/pokered](https://github.com/pret/pokered) `audio/music/pallettown.asm` and `audio/sfx/` (`press_ab`, `ball_toss`, `ball_poof`, `caught_mon`, `run`, `collision`), played by the Game Boy model in `js/audio.js` | Nintendo IP. Fan demo only. No ROM samples |
 | Text box border | pret `gfx/font/font_extra.png` tiles `$79`–`$7e` | Nintendo IP. Fan demo only |
+| Dialogue font | pret `gfx/font/font.png` in `assets/red/font/`, charmap `$80` up | Nintendo IP. Fan demo only |
 | Bulbasaur | Brother's art, `assets/sprites/bulbasaur.png` (copy of the repo sprite; the original file is unchanged) | Used with permission for this fan demo |
 | Other front sprites | [PokeAPI](https://pokeapi.co) Generation I Red/Blue transparent sprites | Pokémon artwork is property of Nintendo / Game Freak / The Pokémon Company. Fan demo only |
 | Press Start 2P | Repo font, SIL Open Font License (`../../assets/fonts/OFL.txt`) | OFL |
 
-Kenney tiles and the Tnypixels walk sheet remain in the repo. The live overworld does not draw them. The world is the four Game Boy shades at 4×, so it reads as Pokémon Red rather than a modern tileset.
+Kenney tiles and the Tnypixels walk sheet remain in the repo. The live overworld does not draw them. The world is the four Red grayscale shades at 4×, so it reads as the original DMG screen rather than a green-tinted or modern tileset.

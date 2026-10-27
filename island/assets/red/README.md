@@ -4,7 +4,7 @@ The live island demo **loads this folder** for the overworld, the player, and th
 
 These PNGs are Nintendo intellectual property, copied from [pret/pokered](https://github.com/pret/pokered) `gfx/` on `master`. Tiago explicitly approved committing them into this public fan-demo repository.
 
-The 2bpp sheets are grayscale. The page colors the world with four muted Game Boy greens and draws it at integer 4× (nearest-neighbor, no blur). Map cells are pret 32×32 blocks. Red's 16×16 walk in `sprites/red.png` is shown at 64px. Red and the Poké Ball use red, white, and black.
+The 2bpp sheets are grayscale. The page draws them as the four DMG shades — white `#f8f8f8`, light gray `#a8a8a8`, dark gray `#585858`, black `#080808` — at integer 4× (nearest-neighbor, no blur). Map cells are pret 32×32 blocks. Red's 16×16 walk in `sprites/red.png` is shown at 64px, hat included, in those same grays. The Poké Ball is white, dark gray, and black. Dialogue uses `font/font.png`.
 
 The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprites/bulbasaur.png`, `ivysaur.png`, `venusaur.png`). Do not replace that grass line with anything from this folder. The other wild fronts are PokeAPI Generation I Red/Blue.
 
@@ -23,7 +23,7 @@ The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprit
 
 `tiles/pokecenter.png` and `tiles/reds_house.png` are loaded with the set. The island does not draw those interiors. House, mart, center, and dojo exteriors are overworld blocks from Pallet Town and Viridian City.
 
-Ice reuses the cavern floor and volcanic rock reuses the plateau. Gen 1 has no ice tileset, and the live world does not blend a second color on top of the four Game Boy shades.
+Ice reuses the cavern floor and volcanic rock reuses the plateau. Gen 1 has no ice tileset, and the live world does not blend a second color on top of the four DMG grays.
 
 ## Tiles (`tiles/`)
 
@@ -44,6 +44,7 @@ From `gfx/tilesets/`:
 | `player/red.png` | `gfx/player/red.png` |
 | `sprites/red.png` | `gfx/sprites/red.png` |
 | `sprites/poke_ball.png` | `gfx/sprites/poke_ball.png` |
+| `font/font.png` | `gfx/font/font.png` |
 | `overworld/battle_transition.png` | `gfx/overworld/battle_transition.png` |
 
 Sound is not vendored. [SFX.md](SFX.md) lists the pret Game Boy tone scripts. Browser playback stays on Web Audio or Kenney.
