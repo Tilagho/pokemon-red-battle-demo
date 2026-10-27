@@ -3,81 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#1c2430" />
+  <meta name="theme-color" content="#081820" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>Pokémon GO Island Demo</title>
   <link rel="icon" href="../assets/sprites/bulbasaur.png" />
   <link rel="stylesheet" href="css/island.css" />
 </head>
 <body>
-<div id="app">
-  <section id="title" class="screen on">
-    <div class="panel">
-      <div class="logo">POKéMON<br><span>GO ISLAND</span><small>DEMO · WALK · CATCH · COLLECT</small></div>
-      <div class="title-row">
-        <img id="red-portrait" class="red" alt="Red" hidden />
-        <img class="bro" src="assets/sprites/bulbasaur.png" alt="Bulbasaur" />
-        <img src="assets/sprites/pikachu.png" alt="Pikachu" />
-        <img src="assets/sprites/eevee.png" alt="Eevee" />
-        <img src="assets/sprites/squirtle.png" alt="Squirtle" />
-      </div>
-      <button class="pbtn" id="btn-start" type="button" disabled>LOADING…</button>
-      <button class="pbtn small" id="btn-sound" type="button">SOUND: ON</button>
-      <a class="pbtn small ghost" href="../">BATTLE DEMO</a>
-      <p class="fine">Unofficial fan project. Not affiliated with Nintendo, Game Freak, or The Pokémon Company. No battles — hold the ground to walk, then hold the ball to throw.</p>
-    </div>
-  </section>
-
-  <section id="play" class="screen">
-    <canvas id="view"></canvas>
-    <header class="hud">
-      <button class="hud-btn" id="btn-dex" type="button">0/15<br>DEX</button>
-      <div class="hud-mid">
-        <div class="hud-title">Pokémon GO Island Demo</div>
-        <div class="hud-count" id="hud-count">0 / 15 caught</div>
-      </div>
-      <button class="hud-btn" id="btn-mute" type="button" aria-pressed="false">SOUND</button>
-      <a class="hud-link" href="../">BATTLE</a>
-    </header>
-    <p id="hint" class="hint">Hold the ground to walk</p>
-    <p class="legal">Unofficial fan project. Not affiliated with Nintendo / Game Freak / The Pokémon Company.</p>
-
-    <div id="encounter" hidden>
-      <div class="enc-card" id="enc-card">
-        <p class="enc-line" id="enc-line"></p>
-        <div class="enc-mon">
-          <img id="enc-sprite" alt="" />
-          <span class="tag" id="enc-type"></span>
-        </div>
-        <svg id="enc-arc" viewBox="0 0 300 100" aria-hidden="true">
-          <path id="arc-path" d="" />
-          <circle id="arc-ball" r="6" cx="150" cy="90" />
-        </svg>
-        <div class="charge" aria-hidden="true"><div id="charge-fill"></div></div>
-        <button class="pbtn" id="ball" type="button">
-          <img src="assets/red/sprites/poke_ball.png" alt="" />
-          <span id="ball-label">HOLD TO THROW</span>
-        </button>
-        <p class="enc-sub" id="enc-sub"></p>
-        <div class="enc-actions" id="enc-actions" hidden>
-          <button class="pbtn" id="enc-dex" type="button">POKéDEX</button>
-          <button class="pbtn" id="enc-go" type="button">KEEP WALKING</button>
-        </div>
-        <button id="enc-away" type="button">BACK AWAY</button>
-        <div id="stars"></div>
-      </div>
-    </div>
-    <img id="throw-ball" src="assets/red/sprites/poke_ball.png" alt="" />
-
-    <div id="dex" hidden>
-      <div class="dex-card">
-        <h2 id="dex-title">POKéDEX 0/15</h2>
-        <div class="dex-grid" id="dex-grid"></div>
-        <button class="pbtn" id="dex-close" type="button">CLOSE</button>
-      </div>
-    </div>
-  </section>
-</div>
+<canvas id="view"></canvas>
 <script src="js/data.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/game.js"></script>
