@@ -1021,14 +1021,14 @@
   const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
 
   function drawFooter() {
-    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
+    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - PX));
     const h = (lines.length * 8 + 2) * PX;
     const y = snap(state.viewH - h);
     ctx.fillStyle = INK;
     ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
     ctx.fillStyle = PAPER;
     ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], PX, y + PX + i * 8 * PX, INK);
     return y;
   }
 
@@ -1387,7 +1387,7 @@
   function drawTitleMenu(foot) {
     const items = titleItems();
     if (!items.length) return;
-    const rowH = 12 * PX;
+    const rowH = 10 * PX;
     const wantH = TW * 2 + items.length * rowH;
     const boxH = Math.ceil(wantH / TW) * TW;
     const boxW = Math.max(TW * 10, Math.floor((state.viewW - 2 * PX) / TW) * TW);
@@ -1418,7 +1418,7 @@
     const foot = drawFooter();
     promptBlink++;
     const items = titleItems();
-    const rowH = 12 * PX;
+    const rowH = 10 * PX;
     const menuH = items.length ? Math.ceil((TW * 2 + items.length * rowH) / TW) * TW : 0;
     const menuTop = foot - menuH;
     let y = 2 * PX;
