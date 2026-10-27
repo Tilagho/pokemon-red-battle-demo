@@ -1,6 +1,7 @@
 /* Pokémon GO Island — overworld, hold-to-pathfind, hold-to-throw catch.
-   Tiles: Kenney RPG base (CC0) spritesheet. Player: Tnypixels CC0 walk.
-   No battles, no D-pad. Center → coast is COAST tiles at SPEED px/s = 5s. */
+   The world is pret/pokered, colored as four muted Game Boy shades and scaled
+   by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
+   No battles, no D-pad. Center → coast is COAST cells at SPEED px/s = 5s. */
 (function () {
   const D = ISLAND_DATA;
   const TILE = D.TILE;
@@ -8,31 +9,63 @@
   const CENTER = D.CENTER;
   const SPEED = D.SPEED;
   console.assert(Math.abs((D.COAST * TILE) / SPEED - 5) < 1e-6, 'coast walk should be 5s');
+  console.assert(TILE % 4 === 0, 'tile must cover a 4×4 Red block');
 
-  const SHEET_COLS = 20;
+  /* pret block bytes (16 tile ids, row-major 4×4). Indices match gfx/blocksets. */
+  const BLOCKS = {
+    ow: {
+      path: [35,35,35,35,57,35,35,35,35,35,35,35,35,35,57,35],
+      tall: [82,82,82,82,82,82,82,82,82,82,82,82,82,82,82,82],
+      grass: [57,57,57,57,57,57,57,57,57,57,57,57,57,57,57,57],
+      roofL: [35,35,35,35,57,35,35,35,5,6,7,7,21,22,23,23],
+      roofR: [35,35,35,35,57,35,35,35,7,7,8,9,23,23,24,25],
+      wallL: [37,38,10,34,92,23,23,23,15,34,11,12,78,26,27,28],
+      wallR: [10,10,40,41,23,23,23,93,10,10,34,31,26,26,26,79],
+      treeL: [42,43,44,44,58,59,44,44,42,43,44,44,58,59,44,44],
+      trees: [44,44,44,44,44,44,44,44,42,43,42,43,58,59,58,59],
+      water: [20,20,20,84,20,20,20,84,20,20,20,84,20,20,20,84],
+      flowers: [57,57,57,57,57,57,57,57,14,14,14,14,85,85,85,85],
+    },
+    forest: {
+      floor: [32,32,32,32,32,32,32,32,48,48,32,32,48,48,32,32],
+      tree: [4,5,6,7,35,21,22,23,36,37,38,39,0,53,54,48],
+      bush: [2,3,2,3,18,19,18,19,32,32,32,32,32,32,32,32],
+    },
+    plateau: {
+      smooth: [35,35,35,35,45,35,35,35,35,35,35,35,35,35,45,35],
+      rock: [42,43,42,43,34,29,34,29,42,43,42,43,34,29,34,29],
+      ground: [44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44],
+      grass: [69,69,69,69,69,69,69,69,69,69,69,69,69,69,69,69],
+    },
+    cavern: {
+      floor: [32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32],
+      pale: [5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5],
+    },
+    port: {
+      dock: [10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10],
+    },
+  };
+
   const FLOOR = {
-    water: 31, shore: 65, meadow: 44, tall: 4, forest: 44, dark: 44,
-    mountain: 154, ice: 74, volcanic: 140, dirt: 125, dojo: 140,
-    ruins: 154, town: 101, path: 101, waterfall: 65,
+    water: ['ow', BLOCKS.ow.water],
+    shore: ['port', BLOCKS.port.dock],
+    meadow: ['ow', BLOCKS.ow.grass],
+    tall: ['ow', BLOCKS.ow.tall],
+    forest: ['forest', BLOCKS.forest.floor],
+    dark: ['forest', BLOCKS.forest.floor],
+    mountain: ['plateau', BLOCKS.plateau.ground],
+    ice: ['cavern', BLOCKS.cavern.pale],
+    volcanic: ['plateau', BLOCKS.plateau.ground],
+    dirt: ['cavern', BLOCKS.cavern.floor],
+    dojo: ['plateau', BLOCKS.plateau.grass],
+    ruins: ['plateau', BLOCKS.plateau.smooth],
+    town: ['ow', BLOCKS.ow.path],
+    path: ['ow', BLOCKS.ow.path],
+    waterfall: ['ow', BLOCKS.ow.water],
   };
-  const TINT = {
-    dark: '#24382c',
-    volcanic: '#e07038',
-    ice: '#d4eaff',
-    waterfall: '#d2f4ff',
-    forest: '#c8e0a0',
-  };
-  const BUSH = 181;
-  const TREE = 220;
-  const TREE_DARK = 224;
-  const TREE_WARM = 222;
-  const ROCK = 194;
-  const ROCK_SM = 248;
-  const ROOF = 126;
-  const FENCE = 186;
-
-  const PW = 16, PH = 20, PSCALE = 3;
-  const DIR_ROW = { down: 0, left: 1, right: 2, up: 3 };
+  /* 16×16 overworld sprite rows in sprites/red.png: stand down/up/left, then walk. */
+  const POSE = { down: [0, 3], up: [1, 4], left: [2, 5], right: [2, 5] };
+  const SPRITE = TILE / 2;
 
   const speciesById = {};
   D.species.forEach(function (s) { speciesById[s.id] = s; });
@@ -71,9 +104,11 @@
     dexClose: document.getElementById('dex-close'),
   };
 
-  let sheet, playerImg;
+  const sheets = {};
+  let playerCanvas = null;
   const biome = [];
   const props = [];
+  const flowers = [];
   const blocked = new Uint8Array(MAP * MAP);
 
   const state = {
@@ -150,11 +185,12 @@
     return 'meadow';
   }
 
-  function placeSolid(x, y, tile) {
+  function placeSolid(x, y, sheet, block) {
     if (!inMap(x, y)) return;
     if (biome[y][x] === 'water' || biome[y][x] === 'path') return;
+    if (y >= 19 && y <= 21 && x >= 16 && x <= 20) return;
     blocked[idx(x, y)] = 1;
-    props.push({ x: x, y: y, tile: tile });
+    props.push({ x: x, y: y, sheet: sheet, block: block });
   }
 
   function buildMap() {
@@ -169,15 +205,15 @@
       }
     }
     // House west of the crossroad, door facing the plaza.
-    placeSolid(15, 15, ROOF);
-    placeSolid(16, 15, ROOF);
-    placeSolid(15, 16, FENCE);
-    // Dojo: wooden back wall, open front toward the road.
-    placeSolid(11, 15, ROOF);
-    placeSolid(12, 15, ROOF);
-    placeSolid(13, 15, ROOF);
-    placeSolid(11, 16, FENCE);
-    placeSolid(13, 16, FENCE);
+    placeSolid(15, 15, 'ow', BLOCKS.ow.roofL);
+    placeSolid(16, 15, 'ow', BLOCKS.ow.roofR);
+    placeSolid(15, 16, 'ow', BLOCKS.ow.wallL);
+    // Dojo: roof along the back, open front toward the road.
+    placeSolid(11, 15, 'ow', BLOCKS.ow.roofL);
+    placeSolid(12, 15, 'ow', BLOCKS.ow.roofR);
+    placeSolid(13, 15, 'ow', BLOCKS.ow.roofL);
+    placeSolid(11, 16, 'ow', BLOCKS.ow.wallL);
+    placeSolid(13, 16, 'ow', BLOCKS.ow.wallR);
 
     for (let y = 0; y < MAP; y++) {
       for (let x = 0; x < MAP; x++) {
@@ -185,14 +221,17 @@
         const b = biome[y][x];
         if (b === 'path' || b === 'water' || b === 'shore' || b === 'town' || b === 'waterfall') continue;
         const r = rnd(x, y);
-        if (b === 'dark' && r < 0.5) placeSolid(x, y, TREE_DARK);
-        else if (b === 'forest' && r < 0.38) placeSolid(x, y, TREE);
-        else if (b === 'meadow' && r < 0.06) placeSolid(x, y, TREE);
-        else if (b === 'mountain' && r < 0.22) placeSolid(x, y, ROCK);
-        else if (b === 'ice' && r < 0.16) placeSolid(x, y, ROCK_SM);
-        else if (b === 'volcanic' && r < 0.14) placeSolid(x, y, TREE_WARM);
-        else if (b === 'ruins' && r < 0.3) placeSolid(x, y, ROCK_SM);
-        else if (b === 'dirt' && r < 0.08) placeSolid(x, y, ROCK_SM);
+        if (b === 'dark' && r < 0.42) placeSolid(x, y, 'forest', BLOCKS.forest.tree);
+        else if (b === 'forest' && r < 0.28) placeSolid(x, y, 'forest', BLOCKS.forest.tree);
+        else if (b === 'forest' && r < 0.4) placeSolid(x, y, 'forest', BLOCKS.forest.bush);
+        else if (b === 'meadow' && r < 0.05) placeSolid(x, y, 'ow', BLOCKS.ow.treeL);
+        else if (b === 'meadow' && r < 0.1) flowers.push({ x: x, y: y });
+        else if (b === 'mountain' && r < 0.2) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
+        else if (b === 'ice' && r < 0.12) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
+        else if (b === 'volcanic' && r < 0.16) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
+        else if (b === 'ruins' && r < 0.28) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
+        else if (b === 'dirt' && r < 0.07) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
+        else if (b === 'tall' && r < 0.04) flowers.push({ x: x, y: y });
       }
     }
     console.assert(walkable(CENTER, CENTER), 'spawn should be walkable');
@@ -278,7 +317,8 @@
   }
 
   function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // Fractional device pixels smear a 4× Game Boy grid. Stay on 1× or 2×.
+    const dpr = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
     const w = window.innerWidth, h = window.innerHeight;
     canvas.width = Math.max(1, Math.floor(w * dpr));
     canvas.height = Math.max(1, Math.floor(h * dpr));
@@ -290,10 +330,16 @@
     ctx.imageSmoothingEnabled = false;
   }
 
-  function drawTile(id, dx, dy) {
-    const sx = (id % SHEET_COLS) * TILE;
-    const sy = Math.floor(id / SHEET_COLS) * TILE;
-    ctx.drawImage(sheet, sx, sy, TILE, TILE, dx, dy, TILE, TILE);
+  function drawBlock(sheetName, block, dx, dy) {
+    const sheet = sheets[sheetName];
+    ctx.imageSmoothingEnabled = false;
+    const step = TILE / 4;
+    for (let i = 0; i < 16; i++) {
+      const tid = block[i];
+      const sx = (tid % 16) * 8;
+      const sy = (tid / 16 | 0) * 8;
+      ctx.drawImage(sheet, sx, sy, 8, 8, dx + (i % 4) * step, dy + ((i / 4) | 0) * step, step, step);
+    }
   }
 
   function render() {
@@ -305,10 +351,12 @@
     else camX = (world - w) / 2;
     if (world > h) camY = Math.max(0, Math.min(world - h, camY));
     else camY = (world - h) / 2;
+    camX = Math.round(camX);
+    camY = Math.round(camY);
     state.camX = camX;
     state.camY = camY;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#14304c';
+    ctx.fillStyle = '#081820';
     ctx.fillRect(0, 0, w, h);
     const ox = -camX, oy = -camY;
     const x0 = Math.max(0, Math.floor(camX / TILE) - 1);
@@ -320,26 +368,21 @@
         const dx = Math.round(x * TILE + ox);
         const dy = Math.round(y * TILE + oy);
         const b = biome[y][x];
-        drawTile(FLOOR[b] || 44, dx, dy);
-        if (TINT[b]) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(dx, dy, TILE, TILE);
-          ctx.clip();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = TINT[b];
-          ctx.fillRect(dx, dy, TILE, TILE);
-          ctx.restore();
-        }
-        if (b === 'tall' || b === 'forest') drawTile(BUSH, dx, dy);
+        const spec = FLOOR[b] || FLOOR.meadow;
+        drawBlock(spec[0], spec[1], dx, dy);
       }
+    }
+    for (let i = 0; i < flowers.length; i++) {
+      const f = flowers[i];
+      if (f.x < x0 - 1 || f.y < y0 - 1 || f.x > x1 + 1 || f.y > y1 + 1) continue;
+      drawBlock('ow', BLOCKS.ow.flowers, Math.round(f.x * TILE + ox), Math.round(f.y * TILE + oy));
     }
     const queue = [];
     for (let i = 0; i < props.length; i++) {
       const p = props[i];
       if (p.x < x0 - 1 || p.y < y0 - 1 || p.x > x1 + 1 || p.y > y1 + 1) continue;
       queue.push({ y: p.y * TILE + TILE, draw: (function (pp) {
-        return function () { drawTile(pp.tile, Math.round(pp.x * TILE + ox), Math.round(pp.y * TILE + oy)); };
+        return function () { drawBlock(pp.sheet, pp.block, Math.round(pp.x * TILE + ox), Math.round(pp.y * TILE + oy)); };
       })(p) });
     }
     queue.push({ y: state.y, draw: drawPlayer });
@@ -348,18 +391,27 @@
   }
 
   function drawPlayer() {
-    const row = DIR_ROW[state.dir] || 0;
+    const pose = POSE[state.dir] || POSE.down;
     const moving = state.path.length > 0 && state.mode === 'explore';
-    const frame = moving ? Math.floor(state.moved / 12) % 4 : 0;
-    const dw = PW * PSCALE, dh = PH * PSCALE;
+    const frame = pose[moving ? (Math.floor(state.moved / 32) % 2) : 0];
+    const dw = SPRITE, dh = SPRITE;
     const dx = state.x - state.camX - dw / 2;
-    const dy = state.y - state.camY - dh + 6;
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    const dy = state.y - state.camY - dh + 4;
+    ctx.fillStyle = 'rgba(8,24,32,0.28)';
     ctx.beginPath();
-    ctx.ellipse(state.x - state.camX, state.y - state.camY, 11, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(state.x - state.camX, state.y - state.camY, 10, 4, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(playerImg, frame * PW, row * PH, PW, PH, Math.round(dx), Math.round(dy), dw, dh);
+    const flip = state.dir === 'right';
+    if (flip) {
+      ctx.save();
+      ctx.translate(Math.round(dx + dw), Math.round(dy));
+      ctx.scale(-1, 1);
+      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, 0, 0, dw, dh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, Math.round(dx), Math.round(dy), dw, dh);
+    }
   }
 
   let lastTileStep = CENTER + CENTER * MAP;
@@ -764,18 +816,68 @@
     });
   }
 
+  // Four muted DMG shades. Every overworld pixel is one of these — no tint blend.
+  const GB = [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]];
+  const RED_SPRITE = [null, [248, 248, 248], [224, 48, 48], [16, 16, 16]];
+  const RED_PIC = [[248, 248, 248], [240, 208, 176], [224, 48, 48], [16, 16, 16]];
+
+  function grayIndex(v) {
+    if (v >= 212) return 0;
+    if (v >= 128) return 1;
+    if (v >= 43) return 2;
+    return 3;
+  }
+
+  function paint(img, palette) {
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const image = g.getImageData(0, 0, c.width, c.height);
+    const d = image.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const col = palette[grayIndex(d[i])];
+      if (!col) d[i + 3] = 0;
+      else { d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255; }
+    }
+    g.putImageData(image, 0, 0);
+    return c;
+  }
+
   async function boot() {
     buildMap();
     wire();
     syncSoundButtons();
     try {
-      const imgs = await Promise.all([
-        loadImage('assets/tiles/kenney-rpg/RPGpack_sheet.png'),
-        loadImage('assets/player/walk.png'),
-      ].concat(D.species.map(function (s) { return loadImage(s.sprite); })));
-      sheet = imgs[0];
-      playerImg = imgs[1];
-      await loadImage('assets/items/poke-ball.png');
+      const src = {
+        ow: 'assets/red/tiles/overworld.png',
+        forest: 'assets/red/tiles/forest.png',
+        plateau: 'assets/red/tiles/plateau.png',
+        cavern: 'assets/red/tiles/cavern.png',
+        port: 'assets/red/tiles/ship_port.png',
+        center: 'assets/red/tiles/pokecenter.png',
+        house: 'assets/red/tiles/reds_house.png',
+      };
+      const keys = Object.keys(src);
+      const imgs = await Promise.all(keys.map(function (k) { return loadImage(src[k]); }).concat([
+        loadImage('assets/red/sprites/red.png'),
+        loadImage('assets/red/player/red.png'),
+        loadImage('assets/red/sprites/poke_ball.png'),
+      ], D.species.map(function (s) { return loadImage(s.sprite); })));
+      keys.forEach(function (k, i) { sheets[k] = paint(imgs[i], GB); });
+      // Interior sheets stay loaded with the Red set. Outdoor cells do not draw them.
+      if (!sheets.center || !sheets.house) throw new Error('red interiors');
+      playerCanvas = paint(imgs[keys.length], RED_SPRITE);
+      const portrait = paint(imgs[keys.length + 1], RED_PIC);
+      const ball = paint(imgs[keys.length + 2], RED_SPRITE);
+      const ballURL = ball.toDataURL();
+      document.querySelectorAll('#ball img, #throw-ball').forEach(function (el) { el.src = ballURL; });
+      const face = document.getElementById('red-portrait');
+      if (face) {
+        face.src = portrait.toDataURL();
+        face.hidden = false;
+      }
       els.start.disabled = false;
       els.start.textContent = 'START';
     } catch (err) {
