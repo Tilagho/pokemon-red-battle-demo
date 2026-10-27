@@ -355,8 +355,7 @@
     else camX = (world - w) / 2;
     if (world > h) camY = Math.max(0, Math.min(world - h, camY));
     else camY = (world - h) / 2;
-    // Keep Red in the upper half while the catch chip sits along the bottom.
-    if (enc.phase === 'chip' && state.mode === 'explore') camY += snap(Math.min(h * 0.2, 160));
+    // Encounter chip is a screen overlay. It must not slide or re-center Red.
     camX = snap(camX);
     camY = snap(camY);
     state.camX = camX;
@@ -817,27 +816,82 @@
     return Math.max(dex.bottom, battle.bottom);
   }
 
+  function gridSil(src, dw, dh) {
+    if (dw === src.width && dh === src.height) return src;
+    const key = dw + 'x' + dh;
+    if (!src._small) src._small = {};
+    if (src._small[key]) return src._small[key];
+    const c = document.createElement('canvas');
+    c.width = dw;
+    c.height = dh;
+    const g = c.getContext('2d');
+    const im = g.createImageData(dw, dh);
+    const sd = src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, src.width, src.height).data;
+    const o = im.data;
+    for (let y = 0; y < dh; y++) {
+      const sy = Math.min(src.height - 1, ((y * src.height / dh) | 0));
+      for (let x = 0; x < dw; x++) {
+        const sx = Math.min(src.width - 1, ((x * src.width / dw) | 0));
+        const si = (sy * src.width + sx) * 4;
+        const di = (y * dw + x) * 4;
+        o[di] = sd[si];
+        o[di + 1] = sd[si + 1];
+        o[di + 2] = sd[si + 2];
+        o[di + 3] = sd[si + 3];
+      }
+    }
+    g.putImageData(im, 0, 0);
+    src._small[key] = c;
+    return c;
+  }
+
   function drawChip(footTop) {
     const mon = enc.mon;
     const sil = spriteSil[mon.id];
     if (!sil) return;
-    const sw = sil.width * PX;
-    const sh = sil.height * PX;
-    const maxW = snap(Math.min(state.viewW - 2 * PX, Math.max(sw + 4 * PX, textW('CATCH!') + 8 * PX)));
-    const inner = maxW - 4 * PX;
-    const away = buttonSize('BACK AWAY', inner);
-    const cat = buttonSize('CATCH!', inner);
-    const h = snap(2 * PX + sh + PX + away.h + PX + cat.h + 2 * PX);
-    let y = snap(footTop - h - PX);
-    const minY = 16 * PX;
-    if (y < minY) y = minY;
-    const x = snap((state.viewW - maxW) / 2);
-    drawPanel(x, y, maxW, Math.min(h, footTop - y - PX));
+    // Fixed screen band: below Red's sprite, above the disclaimer. Camera stays put.
+    const redBottom = snap(state.y - state.camY - SPRITE + PX) + SPRITE;
+    const bandTop = snap(redBottom + 2 * PX);
+    const bandBottom = snap(footTop - PX);
+    const bandH = Math.max(0, bandBottom - bandTop);
+    let step = 1;
+    let lay = null;
+    while (step <= 8) {
+      const dw = Math.max(1, (sil.width / step) | 0);
+      const dh = Math.max(1, (sil.height / step) | 0);
+      const cssW = dw * PX;
+      const cssH = dh * PX;
+      const maxW = snap(Math.min(state.viewW - 2 * PX, Math.max(cssW + 4 * PX, textW('BACK AWAY') + 8 * PX)));
+      const inner = maxW - 4 * PX;
+      const away = buttonSize('BACK AWAY', inner);
+      const cat = buttonSize('CATCH!', inner);
+      const h = snap(2 * PX + cssH + PX + away.h + PX + cat.h + 2 * PX);
+      lay = { dw: dw, dh: dh, cssW: cssW, cssH: cssH, maxW: maxW, inner: inner, h: h };
+      if (h <= bandH) break;
+      step++;
+    }
+    // Sit on the bottom of that band so the block stays in the lower grass, not on Red.
+    let y = snap(bandBottom - lay.h);
+    if (y < bandTop) y = bandTop;
+    const x = snap((state.viewW - lay.maxW) / 2);
+    const panelH = Math.max(PX, Math.min(lay.h, bandBottom - y));
+    drawPanel(x, y, lay.maxW, panelH);
+    const sprite = gridSil(sil, lay.dw, lay.dh);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(sil, 0, 0, sil.width, sil.height, snap(x + (maxW - sw) / 2), y + 2 * PX, sw, sh);
-    let by = y + 2 * PX + sh + PX;
-    const awayBtn = placeButton(x + 2 * PX, by, 'away', 'BACK AWAY', inner);
-    placeButton(x + 2 * PX, awayBtn.bottom + PX, 'catch', 'CATCH!', inner);
+    const sx = snap(x + (lay.maxW - lay.cssW) / 2);
+    const sy = snap(y + 2 * PX);
+    if (sy + lay.cssH <= bandBottom) {
+      ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, sx, sy, lay.cssW, lay.cssH);
+    }
+    let by = snap(sy + lay.cssH + PX);
+    const away = buttonSize('BACK AWAY', lay.inner);
+    if (by + away.h <= bandBottom) {
+      const awayBtn = placeButton(x + 2 * PX, by, 'away', 'BACK AWAY', lay.inner);
+      const catchY = snap(awayBtn.bottom + PX);
+      if (catchY + buttonSize('CATCH!', lay.inner).h <= bandBottom) {
+        placeButton(x + 2 * PX, catchY, 'catch', 'CATCH!', lay.inner);
+      }
+    }
   }
 
   function drawBallAt(x, y) {
@@ -1524,12 +1578,26 @@
     g.drawImage(src, 0, 0);
     const im = g.getImageData(0, 0, c.width, c.height);
     const d = im.data;
+    let minX = c.width, minY = c.height, maxX = -1, maxY = -1;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] < 16) continue;
       d[i] = 8; d[i + 1] = 24; d[i + 2] = 32; d[i + 3] = 255;
+      const p = i / 4;
+      const x = p % c.width;
+      const y = (p / c.width) | 0;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
     }
     g.putImageData(im, 0, 0);
-    return c;
+    if (maxX < minX) return c;
+    const out = document.createElement('canvas');
+    out.width = maxX - minX + 1;
+    out.height = maxY - minY + 1;
+    const og = out.getContext('2d', { willReadFrequently: true });
+    og.drawImage(c, minX, minY, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
   }
 
   async function boot() {
