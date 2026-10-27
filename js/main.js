@@ -46,10 +46,14 @@ function choose(menuId) {
 document.querySelector('.controls').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn || !pending || !btn.closest('#' + pending.menuId)) return;
-  SFX.select();
+  if (btn.dataset.act === 'back') SFX.cancel();
+  else SFX.select();
   const { res } = pending; pending = null; hideMenus(); res(btn.dataset.act);
 });
-['textbox', 'field'].forEach((id) => $(id).addEventListener('pointerdown', () => Text.tap()));
+['textbox', 'field'].forEach((id) => $(id).addEventListener('pointerdown', (e) => {
+  if (e.target.closest('#btn-sound-fab')) return;
+  Text.tap();
+}));
 
 /** Integer sprite scale so pixels stay crisp (2x–4x). */
 function computeScale() {
@@ -58,7 +62,7 @@ function computeScale() {
   const s = Math.max(2, Math.min(4, Math.floor(Math.min(f.width * 0.46, f.height * 0.5) / 56)));
   document.documentElement.style.setProperty('--s', s);
 }
-window.addEventListener('resize', computeScale);
+window.addEventListener('resize', () => { computeScale(); FX.prepare(); });
 
 /* ---------------- Title / select screens ---------------- */
 let chosenStarter = 'BULBASAUR';
@@ -89,13 +93,21 @@ function renderOpponents() {
   }).join('');
 }
 
-$('btn-start').addEventListener('click', () => { SFX.init(); SFX.select(); renderStarters(); showScreen('starter'); });
-$('btn-sound').addEventListener('click', (e) => { SFX.init(); SFX.on = !SFX.on; e.target.textContent = `SOUND: ${SFX.on ? 'ON' : 'OFF'}`; SFX.blip(); });
+function onSoundToggle(e) {
+  e.stopPropagation();
+  SFX.unlock();
+  SFX.toggle();
+  syncLowHp();
+}
+$('btn-start').addEventListener('click', () => { SFX.unlock(); SFX.select(); renderStarters(); showScreen('starter'); });
+$('btn-sound').addEventListener('click', onSoundToggle);
+$('btn-sound-fab').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('btn-sound-fab').addEventListener('click', onSoundToggle);
 $('starter-list').addEventListener('click', (e) => {
   const b = e.target.closest('.pick'); if (!b) return;
   chosenStarter = b.dataset.id; SFX.cry(SPECIES[chosenStarter].cry); renderOpponents(); showScreen('opponent');
 });
-$('btn-back-starter').addEventListener('click', () => { SFX.blip(); showScreen('starter'); });
+$('btn-back-starter').addEventListener('click', () => { SFX.unlock(); SFX.cancel(); showScreen('starter'); });
 $('opponent-list').addEventListener('click', (e) => {
   const b = e.target.closest('.pick'); if (!b) return;
   SFX.select(); chosenEncounter = ENCOUNTERS.find((x) => x.id === b.dataset.id); startBattle();
@@ -118,28 +130,39 @@ function updateHud(mon) {
   const fill = $(`${s}-hp`);
   fill.style.width = `${Math.max(0, pct * 100)}%`;
   fill.className = 'hp-fill' + (pct <= 0.2 ? ' low' : pct <= 0.5 ? ' mid' : '');
-  if (s === 'player') $('player-hpnum').textContent = `${String(Math.ceil(mon.shownHp)).padStart(3, ' ')}/${String(mon.maxHp).padStart(3, ' ')}`;
+  if (s === 'player') {
+    $('player-hpnum').textContent = `${String(Math.ceil(mon.shownHp)).padStart(3, ' ')}/${String(mon.maxHp).padStart(3, ' ')}`;
+    syncLowHp();
+  }
+}
+/** Quiet beep while the player's bar is in the red. */
+function syncLowHp() {
+  if (!P || !B || B.over || P.hp <= 0 || P.shownHp / P.maxHp > 0.2) SFX.stopLowHp();
+  else SFX.startLowHp();
 }
 /** Drain/fill the HP bar gradually, Gen 1 style. */
 function animateHp(mon, to) {
   const from = mon.shownHp, dur = Math.min(1000, 250 + Math.abs(from - to) * 25);
+  const draining = to < from - 0.01;
+  let nextTick = 0;
   return new Promise((res) => {
     const t0 = performance.now();
     const step = (t) => {
       const k = Math.min(1, (t - t0) / dur);
       mon.shownHp = Math.round(from + (to - from) * k);
       updateHud(mon);
+      if (draining && t >= nextTick) { SFX.damageTick(); nextTick = t + 70; }
       k < 1 ? requestAnimationFrame(step) : res();
     };
     requestAnimationFrame(step);
   });
 }
 async function damage(mon, amt) { mon.hp = Math.max(0, mon.hp - amt); await animateHp(mon, mon.hp); }
-async function heal(mon, amt) { mon.hp = Math.min(mon.maxHp, mon.hp + amt); await animateHp(mon, mon.hp); }
+async function heal(mon, amt) { SFX.heal(); mon.hp = Math.min(mon.maxHp, mon.hp + amt); await animateHp(mon, mon.hp); }
 
 /* ---------------- Battle flow ---------------- */
 async function startBattle() {
-  showScreen('battle'); hideMenus(); computeScale();
+  showScreen('battle'); hideMenus(); computeScale(); FX.prepare(); SFX.stopLowHp();
   const lvl = SPECIES[chosenStarter].demoLevel;
   P = createMon(chosenStarter, lvl);
   const foeLvl = chosenEncounter.levelFor ? chosenEncounter.levelFor(lvl) : lvl;
@@ -218,7 +241,7 @@ async function runRound(action) {
   if (action.type === 'run') {
     if (B.trainer) { await Text.say("No running from a\ntrainer battle!"); return; }
     if (canEscape(P, E, B.runAttempts++)) {
-      SFX.select(); await Text.say('Got away safely!'); B.over = true;
+      SFX.escape(); await Text.say('Got away safely!'); B.over = true;
       await FX.play(P.anim, [{ transform: 'translateX(0)' }, { transform: 'translateX(-120vw)' }], { duration: 500, easing: 'steps(10,end)', fill: 'forwards' });
       P.anim.getAnimations().forEach((a) => a.cancel()); P.anim.classList.add('hidden-mon');
       return endBattle('run');
@@ -250,13 +273,21 @@ async function useMove(a, d, slot, id) {
   // Sleep check (Gen 1: waking up uses the turn)
   if (a.status === 'SLP') {
     a.sleepTurns--;
-    if (a.sleepTurns > 0) { FX.floatText(a.anim, 'Z'); await Text.say(`${label(a)}\nis fast asleep!`); return; }
+    if (a.sleepTurns > 0) {
+      SFX.sleep();
+      FX.floatText(a.anim, 'Z');
+      await Text.say(`${label(a)}\nis fast asleep!`);
+      return;
+    }
     a.status = null; updateHud(a);
     await Text.say(`${label(a)}\nwoke up!`); return;
   }
   if (a.status === 'PAR' && Math.random() < 0.25) {
     a.charging = null;
-    await Text.say(`${label(a)}'s\nfully paralyzed!`); return;
+    SFX.paralyze();
+    await FX.zap(a.anim);
+    await Text.say(`${label(a)}'s\nfully paralyzed!`);
+    return;
   }
   if (slot && !releasing) slot.pp = Math.max(0, slot.pp - 1);
 
@@ -264,7 +295,7 @@ async function useMove(a, d, slot, id) {
   if (mv.charge && !releasing) {
     await Text.say(`${label(a)}\nused ${mv.name}!`);
     a.charging = id;
-    await FX.stat(a.img, true);
+    await FX.playMove(a.anim, a.anim, mv, { charge: true });
     await Text.say(`${label(a)}\n${mv.charge}`);
     return;
   }
@@ -272,8 +303,9 @@ async function useMove(a, d, slot, id) {
 
   await Text.say(`${label(a)}\nused ${mv.name}!`);
   if (!accuracyCheck(a, d, mv)) {
-    if (mv.power) await FX.lunge(a.anim, a.isEnemy);
-    await Text.say(`${label(a)}'s\nattack missed!`); return;
+    await FX.playMove(a.anim, d.anim, mv, { miss: true, onImpact() { SFX.miss(); } });
+    await Text.say(`${label(a)}'s\nattack missed!`);
+    return;
   }
 
   if (mv.power) return damagingMove(a, d, mv);
@@ -281,22 +313,31 @@ async function useMove(a, d, slot, id) {
 }
 
 async function damagingMove(a, d, mv) {
-  await FX.lunge(a.anim, a.isEnemy);
-  if (mv.type !== 'NORMAL') await FX.projectile(a.anim, d.anim, mv.type, mv.power >= 90 ? 14 : 8);
-
   const r = calcDamage(a, d, mv);
-  if (r.mult === 0) { await Text.say(`It doesn't affect\n${label(d)}!`); return; }
-  if (r.crit) FX.flash(2);
-  SFX.hit(r.mult);
-  await FX.hit(d.anim, { strong: r.mult > 1 || r.crit });
-  await damage(d, r.damage);
+  let hpDone = Promise.resolve();
+  await FX.playMove(a.anim, d.anim, mv, {
+    immune: r.mult === 0,
+    heavy: r.mult > 1 || r.crit || mv.power >= 80,
+    crit: r.crit,
+    onImpact() {
+      if (r.mult === 0) { SFX.immune(); return; }
+      if (r.crit) FX.flash(2);
+      SFX.strike(r.mult, r.crit);
+      FX.hit(d.anim, { strong: r.mult > 1 || r.crit });
+      hpDone = damage(d, r.damage);
+    },
+  });
+  await hpDone;
 
+  if (r.mult === 0) { await Text.say(`It doesn't affect\n${label(d)}!`); return; }
   if (r.crit) await Text.say('Critical hit!');
   if (r.mult > 1) await Text.say("It's super\neffective!");
   else if (r.mult < 1) await Text.say("It's not very\neffective...");
 
   if (mv.recoil && a.hp > 0) {
     await Text.say(`${label(a)}'s\nhit with recoil!`);
+    SFX.strike(1, false);
+    FX.hit(a.anim);
     await damage(a, Math.max(1, Math.floor(r.damage * mv.recoil)));
   }
 
@@ -306,7 +347,8 @@ async function damagingMove(a, d, mv) {
     const immune = { BRN: 'FIRE', PAR: 'NORMAL' }[sec.status];   // Gen 1 immunities
     if (sec.status && !d.status && !d.types.includes(immune)) {
       d.status = sec.status; updateHud(d);
-      await FX.powder(d.anim, sec.status === 'BRN' ? 'FIRE' : 'NORMAL', 8);
+      if (sec.status === 'BRN') { SFX.statusTick('BRN'); await FX.sprinkle(d.anim, 'FIRE'); }
+      else { SFX.paralyze(); await FX.zap(d.anim); }
       await Text.say(sec.status === 'BRN' ? `${label(d)}\nwas burned!` : `${label(d)}'s\nparalyzed!`);
     } else if (sec.stat && d.stages[sec.stat] > -6) {
       d.stages[sec.stat] += sec.delta; SFX.stat(false); await FX.stat(d.img, false);
@@ -317,37 +359,38 @@ async function damagingMove(a, d, mv) {
 
 async function statusMove(a, d, mv) {
   const ef = mv.effect;
+  const self = ef.kind === 'stat' && ef.target === 'self';
+  await FX.playMove(a.anim, self ? a.anim : d.anim, mv);
 
   if (ef.kind === 'stat') {
     const t = ef.target === 'self' ? a : d;
-    await FX.hop(a.anim);
     const cur = t.stages[ef.stat], nv = Math.max(-6, Math.min(6, cur + ef.delta));
     if (nv === cur) { await Text.say('Nothing happened!'); return; }
     t.stages[ef.stat] = nv;
-    const up = ef.delta > 0; SFX.stat(up); await FX.stat(t.img, up);
+    const up = ef.delta > 0;
+    await FX.stat(t.img, up);
     await Text.say(`${label(t)}'s\n${STAT_NAMES[ef.stat]} ${up ? 'rose' : 'fell'}!`);
     return;
   }
 
   if (ef.kind === 'leech') {
-    await FX.projectile(a.anim, d.anim, 'GRASS', 5);
     if (d.types.includes('GRASS')) { await Text.say(`It doesn't affect\n${label(d)}!`); return; }
     if (d.seeded) { await Text.say('But it failed!'); return; }
-    d.seeded = true; await FX.hit(d.anim);
+    d.seeded = true;
     await Text.say(`${label(d)}\nwas seeded!`);
     return;
   }
 
   if (ef.kind === 'status') {
-    await FX.powder(d.anim, mv.type);
     if (ef.status === 'PSN' && d.types.includes('POISON')) { await Text.say(`It doesn't affect\n${label(d)}!`); return; }
     if (d.status) { await Text.say('But it failed!'); return; }
     d.status = ef.status; updateHud(d);
     if (ef.status === 'SLP') {
-      d.sleepTurns = randRange(1, 7); d.charging = null; FX.floatText(d.anim, 'Z');
+      d.sleepTurns = randRange(1, 7); d.charging = null;
+      SFX.sleep();
+      FX.floatText(d.anim, 'Z');
       await Text.say(`${label(d)}\nfell asleep!`);
     } else {
-      await FX.stat(d.img, false);
       await Text.say(`${label(d)}\nwas poisoned!`);
     }
   }
@@ -358,17 +401,22 @@ async function residuals() {
   for (const m of [P, E]) {
     if (m.hp <= 0 || B.over) continue;
     if (m.status === 'PSN' || m.status === 'BRN') {
-      await Text.say(`${label(m)}'s\nhurt by ${m.status === 'PSN' ? 'poison' : 'the burn'}!`);
-      FX.hit(m.anim); await damage(m, Math.max(1, Math.floor(m.maxHp / 16)));
+      const said = Text.say(`${label(m)}'s\nhurt by ${m.status === 'PSN' ? 'poison' : 'the burn'}!`);
+      SFX.statusTick(m.status);
+      await FX.sprinkle(m.anim, m.status === 'BRN' ? 'FIRE' : 'POISON');
+      await damage(m, Math.max(1, Math.floor(m.maxHp / 16)));
+      await said;
       if (await checkFaint()) return;
     }
     if (m.seeded && m.hp > 0) {
       const other = m === P ? E : P;
       const amt = Math.min(m.hp, Math.max(1, Math.floor(m.maxHp / 16)));
-      FX.powder(m.anim, 'GRASS', 8);
-      await Text.say(`LEECH SEED saps\n${label(m)}!`);
+      const said = Text.say(`LEECH SEED saps\n${label(m)}!`);
+      SFX.statusTick('SEED');
+      await FX.sprinkle(m.anim, 'GRASS');
       await damage(m, amt);
       if (other.hp > 0) await heal(other, amt);
+      await said;
       if (await checkFaint()) return;
     }
   }
@@ -376,6 +424,7 @@ async function residuals() {
 
 /** Returns true when the battle is over. */
 async function checkFaint() {
+  if (E.hp <= 0 || P.hp <= 0) SFX.stopLowHp();
   if (E.hp <= 0) {
     SFX.faint(E.species.cry); await FX.faint(E.img);
     $('enemy-hud').classList.add('hidden');
@@ -401,6 +450,7 @@ async function checkFaint() {
 
 function endBattle(result) {
   B.over = true;
+  SFX.stopLowHp();
   if (result === 'win') SFX.win(); else if (result === 'lose') SFX.lose();
   const msg = { win: 'You won!', lose: 'Out of luck...', run: 'Escaped!' }[result];
   Text.say(`${msg}\nPlay again?`, { hold: true });
@@ -426,6 +476,13 @@ function showSummary() {
     <p style="font-size:8px;opacity:.7;line-height:1.7">Only one POKéMON in your party for this demo.</p>`;
   $('summary').hidden = false;
   return new Promise((res) => {
-    $('sum-close').onclick = () => { SFX.blip(); $('summary').hidden = true; res(); };
+    $('sum-close').onclick = () => { SFX.cancel(); $('summary').hidden = true; res(); };
   });
 }
+
+/* First tap unlocks audio (required by iPhone Safari). Mute sticks across visits. */
+SFX.load();
+SFX.refreshLabels();
+window.addEventListener('pointerdown', () => { SFX.unlock(); syncLowHp(); }, { passive: true });
+window.addEventListener('touchstart', () => { SFX.unlock(); syncLowHp(); }, { passive: true });
+window.addEventListener('keydown', () => { SFX.unlock(); syncLowHp(); });

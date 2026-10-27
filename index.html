@@ -21,8 +21,8 @@
         <img src="assets/sprites/ivysaur.png" alt="Ivysaur" class="sprite s2 bob d1" />
         <img src="assets/sprites/venusaur.png" alt="Venusaur" class="sprite s2 bob d2" />
       </div>
-      <button class="pbtn big" id="btn-start">▶ START</button>
-      <button class="pbtn small" id="btn-sound">SOUND: ON</button>
+      <button class="pbtn big" id="btn-start" type="button">▶ START</button>
+      <button class="pbtn small" id="btn-sound" type="button" aria-pressed="true" aria-label="Mute sound">SOUND: ON</button>
       <p class="fine">Unofficial fan project. Not affiliated with Nintendo / Game Freak / The Pokémon Company.</p>
     </div>
   </section>
@@ -63,13 +63,14 @@
         <div class="hp-row"><span class="hp-label">HP:</span><div class="hp-bar"><div class="hp-fill" id="player-hp"></div></div></div>
         <div class="hp-num" id="player-hpnum">0/ 0</div>
       </div>
-      <div id="fx" class="fx"></div>
+      <div id="fx" class="fx"><canvas id="vfx" class="vfx" width="160" height="100" aria-hidden="true"></canvas></div>
       <div id="flash" class="flash"></div>
     </div>
 
     <div class="controls">
       <div class="textbox" id="textbox" role="button" aria-label="Advance text">
         <p id="text"></p><span class="next" id="next">▼</span>
+        <button type="button" class="sound-chip" id="btn-sound-fab" aria-pressed="true" aria-label="Mute sound">ON</button>
       </div>
 
       <div class="menu-area">
@@ -106,6 +107,7 @@
 
 <script src="js/data.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/fx.js"></script>
 <script src="js/main.js"></script>
 </body>

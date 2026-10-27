@@ -16,15 +16,6 @@ const TYPE_CHART = {
 // Gen 1: Fire/Water/Grass/... are "special"; Normal/Poison are "physical".
 const SPECIAL_TYPES = new Set(['FIRE', 'WATER', 'GRASS']);
 
-// Colors used for move particles & type labels.
-const TYPE_COLORS = {
-  NORMAL: ['#f8f8f8', '#b8b8a8'],
-  FIRE:   ['#f88830', '#f8d030', '#e03020'],
-  WATER:  ['#68b0f8', '#d0f0ff', '#3878d8'],
-  GRASS:  ['#58c858', '#a8e878', '#2f8f3f'],
-  POISON: ['#a050c0', '#d090e8'],
-};
-
 /*  Move fields:
     type, power (0 = status), acc (null = never misses), pp
     highCrit   – Razor Leaf / Slash style crit boost
