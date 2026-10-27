@@ -21,10 +21,13 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 - **Hold the ground** (or press and drag) on walkable land. Red pathfinds there and keeps walking if you let go. Drag while held to change the destination. Water, trees, rocks, and walls are blocked. There is no D-pad.
 - The camera follows the player. From the town center to the coast, straight ahead, is **15 blocks**. Each block is 32×32 Red pixels drawn at integer **4×** (128px on screen). Red's 16×16 sprite is **64px** (16→64), nearest-neighbor, no blur. Walk speed is **384 px/s**, so that walk is **5 seconds**.
 - Stepping through tall grass, forest, shore, and the other encounter biomes can start a wild encounter. It is not every step: a short warmup, then a per-tile roll, then a few seconds of quiet after each encounter.
-- **Hold the Poké Ball**, watch the arc and the meter, then **release** to throw. A very short hold misses. A fuller hold is more likely to catch.
-- Three failed throws can make the Pokémon flee; the fourth always does. **Back away** leaves without throwing.
-- A catch plays a short success flourish and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). The HUD button opens the dex. **SOUND** mutes the Kenney effects and the synthesized stingers (`pogo-island-mute`).
-- **BATTLE** returns to the root battle demo.
+- An encounter does **not** freeze the walk. A pixel chip shows a solid silhouette (the species stays hidden) with **Back away** and **Catch!**. Hold-to-path still works. Walking about three blocks away dismisses the chip, same as Back away. The Pokémon can show up again later under the same cooldown.
+- **Catch!** opens the throw. Flick the Poké Ball upward at the Pokémon. Swirling around the ball before the flick puts spin on it and the ball curves, like Pokémon GO. A straight throw can still land, at a slightly lower catch rate than a curve that connects. Misses, break-outs, and catches use the same flee rules as before: three failures can send it running, and the fourth always does.
+- After a catch or a flee, the throw closes and the overworld is free again.
+- Every button, glyph, silhouette, and ball is drawn on the same 4× Game Boy grid as the map. There is no separate CSS overlay.
+- The ocean cycles the original Red water tile: overworld tile `$14` scrolls one pixel every 20 frames, right for four steps and left for four, the same bob as `UpdateMovingBgTiles`. The coastline is that stair-step cliff lip (overworld tile 49) turned to meet every water edge, including corners.
+- A catch plays a short success flourish and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). **DEX** opens it. **SOUND** / **SND** mutes the Kenney effects and the synthesized stingers (`pogo-island-mute`).
+- **BATTLE** / **BTL** returns to the root battle demo.
 
 ## Biome → type
 
@@ -57,7 +60,7 @@ The live demo loads this folder for the overworld. See `assets/red/README.md`.
 | Biome | Sheet |
 | --- | --- |
 | Meadow, tall grass, path, town, water, waterfall | `tiles/overworld.png` |
-| Shore | `tiles/ship_port.png` (dock) |
+| Shore lip | `tiles/overworld.png` tile 49 (stair-step cliff into the sea), rotated for the other edges. `tiles/ship_port.png` still loads with the Red set |
 | Forest and dark forest | `tiles/forest.png` |
 | Mountain, dojo yard, ruins, volcanic rock | `tiles/plateau.png` |
 | Dirt and ice | `tiles/cavern.png` (Gen 1 has no ice tileset) |

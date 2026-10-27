@@ -1,6 +1,7 @@
-/* Pokémon GO Island — overworld, hold-to-pathfind, hold-to-throw catch.
+/* Pokémon GO Island — overworld, hold-to-pathfind, GO-style flick catch.
    The world is pret/pokered, colored as four muted Game Boy shades and scaled
    by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
+   Encounter chip, buttons, and the throw are drawn on this same pixel grid.
    No battles, no D-pad. Center → coast is COAST cells at SPEED px/s = 5s. */
 (function () {
   const D = ISLAND_DATA;
@@ -48,7 +49,7 @@
 
   const FLOOR = {
     water: ['ow', BLOCKS.ow.water],
-    shore: ['port', BLOCKS.port.dock],
+    shore: ['ow', BLOCKS.ow.grass],
     meadow: ['ow', BLOCKS.ow.grass],
     tall: ['ow', BLOCKS.ow.tall],
     forest: ['forest', BLOCKS.forest.floor],
@@ -66,43 +67,33 @@
   /* 16×16 overworld sprite rows in sprites/red.png: stand down/up/left, then walk. */
   const POSE = { down: [0, 3], up: [1, 4], left: [2, 5], right: [2, 5] };
   const SPRITE = TILE / 2;
+  /* One Game Boy pixel. 8×8 Red tiles are drawn at 4×, so this is 4 CSS px. */
+  const PX = TILE / 32;
+  console.assert(PX === 4, 'GB pixel must stay on the 4× grid');
 
   const speciesById = {};
   D.species.forEach(function (s) { speciesById[s.id] = s; });
 
   const canvas = document.getElementById('view');
   const ctx = canvas.getContext('2d');
-  const els = {
-    title: document.getElementById('title'),
-    play: document.getElementById('play'),
-    start: document.getElementById('btn-start'),
-    sound: document.getElementById('btn-sound'),
-    mute: document.getElementById('btn-mute'),
-    dexBtn: document.getElementById('btn-dex'),
-    hudCount: document.getElementById('hud-count'),
-    hint: document.getElementById('hint'),
-    encounter: document.getElementById('encounter'),
-    encCard: document.getElementById('enc-card'),
-    encLine: document.getElementById('enc-line'),
-    encSprite: document.getElementById('enc-sprite'),
-    encType: document.getElementById('enc-type'),
-    arcPath: document.getElementById('arc-path'),
-    arcBall: document.getElementById('arc-ball'),
-    charge: document.getElementById('charge-fill'),
-    ball: document.getElementById('ball'),
-    ballLabel: document.getElementById('ball-label'),
-    encSub: document.getElementById('enc-sub'),
-    encActions: document.getElementById('enc-actions'),
-    encDex: document.getElementById('enc-dex'),
-    encGo: document.getElementById('enc-go'),
-    encAway: document.getElementById('enc-away'),
-    stars: document.getElementById('stars'),
-    throwBall: document.getElementById('throw-ball'),
-    dex: document.getElementById('dex'),
-    dexTitle: document.getElementById('dex-title'),
-    dexGrid: document.getElementById('dex-grid'),
-    dexClose: document.getElementById('dex-close'),
-  };
+  const INK = '#081820';
+  const PAPER = '#e0f8d0';
+  const MID = '#88c070';
+  const SHADE = '#346856';
+  const BALL = 16 * PX;
+
+  let ready = false;
+  let bootError = false;
+  let redPic = null;
+  let ballCanvas = null;
+  let shore = null;
+  let waterFrames = null;
+  let waterFrame = 0;
+  let waterTick = 0;
+  let dexScroll = 0;
+  const spriteImg = {};
+  const spriteSil = {};
+  const ui = { hits: [], press: null, mon: null, ballHome: null, ballHit: null };
 
   const sheets = {};
   let playerCanvas = null;
@@ -133,13 +124,26 @@
   const enc = {
     phase: 'idle',
     mon: null,
-    charge: 0,
-    chargeT: 0,
     tries: 0,
-    t0: 0,
+    spin: 0,
+    curved: false,
+    vx: 0,
+    vy: 0,
+    bx: 0,
+    by: 0,
+    ax: 0,
+    ay: 0,
+    drag: false,
+    pts: [],
+    trail: [],
+    flightT: 0,
     shakes: 0,
+    shakeT: 0,
     success: false,
-    openDexAfter: false,
+    hideMon: false,
+    holdT: 0,
+    stars: [],
+    last: null,
   };
 
   const DEX_KEY = 'pogo-island-dex';
@@ -224,14 +228,14 @@
         if (b === 'dark' && r < 0.42) placeSolid(x, y, 'forest', BLOCKS.forest.tree);
         else if (b === 'forest' && r < 0.28) placeSolid(x, y, 'forest', BLOCKS.forest.tree);
         else if (b === 'forest' && r < 0.4) placeSolid(x, y, 'forest', BLOCKS.forest.bush);
-        else if (b === 'meadow' && r < 0.05) placeSolid(x, y, 'ow', BLOCKS.ow.treeL);
-        else if (b === 'meadow' && r < 0.1) flowers.push({ x: x, y: y });
+        else if (b === 'meadow' && r < 0.05 && !nearOcean(x, y)) placeSolid(x, y, 'ow', BLOCKS.ow.treeL);
+        else if (b === 'meadow' && r < 0.1 && !nearOcean(x, y)) flowers.push({ x: x, y: y });
         else if (b === 'mountain' && r < 0.2) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
         else if (b === 'ice' && r < 0.12) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
         else if (b === 'volcanic' && r < 0.16) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
         else if (b === 'ruins' && r < 0.28) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
         else if (b === 'dirt' && r < 0.07) placeSolid(x, y, 'plateau', BLOCKS.plateau.rock);
-        else if (b === 'tall' && r < 0.04) flowers.push({ x: x, y: y });
+        else if (b === 'tall' && r < 0.04 && !nearOcean(x, y)) flowers.push({ x: x, y: y });
       }
     }
     console.assert(walkable(CENTER, CENTER), 'spawn should be walkable');
@@ -351,8 +355,10 @@
     else camX = (world - w) / 2;
     if (world > h) camY = Math.max(0, Math.min(world - h, camY));
     else camY = (world - h) / 2;
-    camX = Math.round(camX);
-    camY = Math.round(camY);
+    // Keep Red in the upper half while the catch chip sits along the bottom.
+    if (enc.phase === 'chip' && state.mode === 'explore') camY += snap(Math.min(h * 0.2, 160));
+    camX = snap(camX);
+    camY = snap(camY);
     state.camX = camX;
     state.camY = camY;
     ctx.imageSmoothingEnabled = false;
@@ -368,8 +374,12 @@
         const dx = Math.round(x * TILE + ox);
         const dy = Math.round(y * TILE + oy);
         const b = biome[y][x];
-        const spec = FLOOR[b] || FLOOR.meadow;
-        drawBlock(spec[0], spec[1], dx, dy);
+        if (b === 'water' || b === 'waterfall') drawWater(dx, dy);
+        else {
+          const spec = FLOOR[b] || FLOOR.meadow;
+          drawBlock(spec[0], spec[1], dx, dy);
+          drawShoreRim(x, y, dx, dy);
+        }
       }
     }
     for (let i = 0; i < flowers.length; i++) {
@@ -388,6 +398,7 @@
     queue.push({ y: state.y, draw: drawPlayer });
     queue.sort(function (a, b) { return a.y - b.y; });
     for (let i = 0; i < queue.length; i++) queue[i].draw();
+    drawPixelUI();
   }
 
   function drawPlayer() {
@@ -395,22 +406,25 @@
     const moving = state.path.length > 0 && state.mode === 'explore';
     const frame = pose[moving ? (Math.floor(state.moved / 32) % 2) : 0];
     const dw = SPRITE, dh = SPRITE;
-    const dx = state.x - state.camX - dw / 2;
-    const dy = state.y - state.camY - dh + 4;
-    ctx.fillStyle = 'rgba(8,24,32,0.28)';
-    ctx.beginPath();
-    ctx.ellipse(state.x - state.camX, state.y - state.camY, 10, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const dx = snap(state.x - state.camX - dw / 2);
+    const dy = snap(state.y - state.camY - dh + PX);
+    const fx = snap(state.x - state.camX);
+    const fy = snap(state.y - state.camY);
+    ctx.fillStyle = INK;
+    ctx.fillRect(fx - 2 * PX, fy - PX, 4 * PX, PX);
+    ctx.fillRect(fx - 3 * PX, fy, 6 * PX, PX);
+    ctx.fillRect(fx - 2 * PX, fy + PX, 4 * PX, PX);
     ctx.imageSmoothingEnabled = false;
     const flip = state.dir === 'right';
     if (flip) {
       ctx.save();
-      ctx.translate(Math.round(dx + dw), Math.round(dy));
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(dx + dw, dy);
       ctx.scale(-1, 1);
       ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, 0, 0, dw, dh);
       ctx.restore();
     } else {
-      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, Math.round(dx), Math.round(dy), dw, dh);
+      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, dx, dy, dw, dh);
     }
   }
 
@@ -450,11 +464,14 @@
       IslandAudio.footstep();
       const b = biome[ty][tx];
       const rate = D.rates[b] || 0;
-      if (rate && state.steps >= 2 && state.cooldown <= 0 && Math.random() < rate) {
+      if (enc.phase === 'idle' && rate && state.steps >= 2 && state.cooldown <= 0 && Math.random() < rate) {
         startEncounter(b);
       }
     }
-    if (state.moved > 48) els.hint.classList.add('hide');
+    if (enc.phase === 'chip') {
+      const dist = Math.hypot(state.x - enc.ax, state.y - enc.ay);
+      if (dist >= 3 * TILE) endEncounter();
+    }
   }
 
   function screenToTile(clientX, clientY) {
@@ -464,22 +481,66 @@
     return [Math.floor(wx / TILE), Math.floor(wy / TILE)];
   }
 
+  function canvasPoint(e) {
+    const r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+  function hitAt(x, y) {
+    const list = ui.hits;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) return b.id;
+    }
+    return null;
+  }
   function onPointerDown(e) {
-    if (state.mode !== 'explore') return;
     if (e.button != null && e.button !== 0) return;
     e.preventDefault();
     IslandAudio.unlock();
-    canvas.setPointerCapture(e.pointerId);
+    if (!ready) return;
+    const p = canvasPoint(e);
+    const id = hitAt(p[0], p[1]);
+    if (state.mode === 'title' || state.mode === 'dex') {
+      ui.press = id;
+      return;
+    }
+    if (state.mode === 'throw') {
+      onThrowDown(e, p[0], p[1], id);
+      return;
+    }
+    if (id) {
+      ui.press = id;
+      return;
+    }
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already captured */ }
     state.hold = true;
     const t = screenToTile(e.clientX, e.clientY);
     setGoal(t[0], t[1]);
   }
   function onPointerMove(e) {
+    const p = canvasPoint(e);
+    if (state.mode === 'throw' && enc.drag) {
+      noteSpin(p[0], p[1]);
+      enc.pts.push({ x: p[0], y: p[1], t: performance.now() });
+      if (enc.pts.length > 28) enc.pts.shift();
+      enc.bx = p[0] - BALL / 2;
+      enc.by = p[1] - BALL / 2;
+      return;
+    }
     if (!state.hold || state.mode !== 'explore') return;
     const t = screenToTile(e.clientX, e.clientY);
     setGoal(t[0], t[1]);
   }
-  function onPointerUp() { state.hold = false; }
+  function onPointerUp(e) {
+    const p = e ? canvasPoint(e) : null;
+    if (enc.drag) releaseThrow();
+    if (ui.press && p) {
+      const id = hitAt(p[0], p[1]);
+      if (id === ui.press) activate(id);
+    }
+    ui.press = null;
+    state.hold = false;
+  }
 
   function pickSpecies(biomeName) {
     const table = D.spawns[biomeName];
@@ -494,287 +555,784 @@
     return speciesById[table[table.length - 1][0]];
   }
 
-  function refreshHud() {
-    const n = caughtCount();
-    els.dexBtn.innerHTML = n + '/15<br>DEX';
-    els.hudCount.textContent = n + ' / 15 caught';
-    const on = !IslandAudio.isMuted();
-    els.sound.textContent = on ? 'SOUND: ON' : 'SOUND: OFF';
-    els.mute.textContent = on ? 'SOUND' : 'MUTE';
-    els.mute.setAttribute('aria-pressed', on ? 'false' : 'true');
+  function snap(v) { return Math.round(v / PX) * PX; }
+
+  function isOcean(x, y) {
+    if (!inMap(x, y)) return true;
+    const b = biome[y][x];
+    return b === 'water' || b === 'waterfall';
+  }
+  function nearOcean(x, y) {
+    return isOcean(x - 1, y) || isOcean(x + 1, y) || isOcean(x, y - 1) || isOcean(x, y + 1);
   }
 
-  function showBallUI(on) {
-    els.ball.hidden = !on;
-    els.encAway.hidden = !on;
-    document.querySelector('.charge').hidden = !on;
-    els.encArc = document.getElementById('enc-arc');
-    els.encArc.hidden = !on;
+  function drawWater(dx, dy) {
+    const block = BLOCKS.ow.water;
+    const sheet = sheets.ow;
+    const step = TILE / 4;
+    const frame = waterFrames[waterFrame];
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < 16; i++) {
+      const tid = block[i];
+      const destX = dx + (i % 4) * step;
+      const destY = dy + ((i / 4) | 0) * step;
+      if (tid === 20 && frame) ctx.drawImage(frame, 0, 0, 8, 8, destX, destY, step, step);
+      else {
+        const sx = (tid % 16) * 8;
+        const sy = (tid / 16 | 0) * 8;
+        ctx.drawImage(sheet, sx, sy, 8, 8, destX, destY, step, step);
+      }
+    }
+  }
+
+  function drawShoreRim(x, y, dx, dy) {
+    if (!shore || isOcean(x, y)) return;
+    const n = isOcean(x, y - 1), s = isOcean(x, y + 1), e = isOcean(x + 1, y), w = isOcean(x - 1, y);
+    const se = isOcean(x + 1, y + 1), sw = isOcean(x - 1, y + 1);
+    const ne = isOcean(x + 1, y - 1), nw = isOcean(x - 1, y - 1);
+    if (!n && !s && !e && !w && !se && !sw && !ne && !nw) return;
+    const step = TILE / 4;
+    ctx.imageSmoothingEnabled = false;
+    function stamp(tile, col, row) {
+      ctx.drawImage(tile, 0, 0, 8, 8, dx + col * step, dy + row * step, step, step);
+    }
+    if (n) for (let i = 0; i < 4; i++) stamp(shore.n, i, 0);
+    if (s) for (let i = 0; i < 4; i++) stamp(shore.s, i, 3);
+    if (w) for (let i = 0; i < 4; i++) stamp(shore.w, 0, i);
+    if (e) for (let i = 0; i < 4; i++) stamp(shore.e, 3, i);
+    if ((n && w) || nw) stamp(shore.nw, 0, 0);
+    if ((n && e) || ne) stamp(shore.ne, 3, 0);
+    if ((s && w) || sw) stamp(shore.sw, 0, 3);
+    if ((s && e) || se) stamp(shore.se, 3, 3);
+  }
+
+  const FONT = {};
+  function addGlyph(ch, rows) {
+    const bits = [];
+    for (let y = 0; y < 8; y++) {
+      let n = 0;
+      const s = rows[y] || '';
+      for (let x = 0; x < 8; x++) if (s.charAt(x) === '#') n |= 128 >> x;
+      bits.push(n);
+    }
+    FONT[ch] = bits;
+  }
+  const G = {
+    ' ': ['', '', '', '', '', '', '', ''],
+    'A': [' ## ', '#  #', '#  #', '####', '#  #', '#  #', '#  #', ''],
+    'B': ['### ', '#  #', '#  #', '### ', '#  #', '#  #', '### ', ''],
+    'C': [' ###', '#   ', '#   ', '#   ', '#   ', '#   ', ' ###', ''],
+    'D': ['### ', '#  #', '#  #', '#  #', '#  #', '#  #', '### ', ''],
+    'E': ['####', '#   ', '#   ', '### ', '#   ', '#   ', '####', ''],
+    'F': ['####', '#   ', '#   ', '### ', '#   ', '#   ', '#   ', ''],
+    'G': [' ###', '#   ', '#   ', '# ##', '#  #', '#  #', ' ###', ''],
+    'H': ['#  #', '#  #', '#  #', '####', '#  #', '#  #', '#  #', ''],
+    'I': ['###', ' # ', ' # ', ' # ', ' # ', ' # ', '###', ''],
+    'J': ['  ##', '   #', '   #', '   #', '#  #', '#  #', ' ## ', ''],
+    'K': ['#  #', '# # ', '##  ', '#   ', '##  ', '# # ', '#  #', ''],
+    'L': ['#   ', '#   ', '#   ', '#   ', '#   ', '#   ', '####', ''],
+    'M': ['#   #', '## ##', '# # #', '#   #', '#   #', '#   #', '#   #', ''],
+    'N': ['#  #', '## #', '## #', '# ##', '# ##', '#  #', '#  #', ''],
+    'O': [' ## ', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
+    'P': ['### ', '#  #', '#  #', '### ', '#   ', '#   ', '#   ', ''],
+    'Q': [' ## ', '#  #', '#  #', '#  #', '# ##', '#  #', ' ## ', ''],
+    'R': ['### ', '#  #', '#  #', '### ', '# # ', '#  #', '#  #', ''],
+    'S': [' ###', '#   ', '#   ', ' ## ', '   #', '   #', '### ', ''],
+    'T': ['####', ' #  ', ' #  ', ' #  ', ' #  ', ' #  ', ' #  ', ''],
+    'U': ['#  #', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
+    'V': ['#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ' ## ', ''],
+    'W': ['#   #', '#   #', '#   #', '# # #', '# # #', '## ##', '#   #', ''],
+    'X': ['#  #', '#  #', ' ## ', ' ## ', ' ## ', '#  #', '#  #', ''],
+    'Y': ['#  #', '#  #', ' ## ', ' #  ', ' #  ', ' #  ', ' #  ', ''],
+    'Z': ['####', '   #', '  # ', ' #  ', '#   ', '#   ', '####', ''],
+    '0': [' ## ', '#  #', '#  #', '#  #', '#  #', '#  #', ' ## ', ''],
+    '1': [' # ', '## ', ' # ', ' # ', ' # ', ' # ', '###', ''],
+    '2': [' ## ', '#  #', '   #', '  # ', ' #  ', '#   ', '####', ''],
+    '3': ['### ', '   #', '   #', ' ## ', '   #', '   #', '### ', ''],
+    '4': ['#  #', '#  #', '#  #', '####', '   #', '   #', '   #', ''],
+    '5': ['####', '#   ', '#   ', '### ', '   #', '   #', '### ', ''],
+    '6': [' ## ', '#   ', '#   ', '### ', '#  #', '#  #', ' ## ', ''],
+    '7': ['####', '   #', '  # ', '  # ', ' #  ', ' #  ', ' #  ', ''],
+    '8': [' ## ', '#  #', '#  #', ' ## ', '#  #', '#  #', ' ## ', ''],
+    '9': [' ## ', '#  #', '#  #', ' ###', '   #', '   #', ' ## ', ''],
+    '.': ['', '', '', '', '', '##', '##', ''],
+    ',': ['', '', '', '', ' #', ' #', '# ', ''],
+    '!': [' # ', ' # ', ' # ', ' # ', '   ', ' # ', ' # ', ''],
+    '?': [' ## ', '#  #', '   #', '  # ', ' #  ', '    ', ' #  ', ''],
+    "'": [' # ', ' # ', '#  ', '', '', '', '', ''],
+    '/': ['   #', '   #', '  # ', '  # ', ' #  ', ' #  ', '#   ', ''],
+    '-': ['', '', '', '###', '', '', '', ''],
+    ':': ['', ' # ', ' # ', '', ' # ', ' # ', '', ''],
+  };
+  Object.keys(G).forEach(function (ch) { addGlyph(ch, G[ch]); });
+
+  const ADV = 6;
+
+  function textW(text) { return text.length * ADV * PX; }
+
+  function drawText(text, x, y, color) {
+    ctx.fillStyle = color || INK;
+    let cx = snap(x);
+    const cy = snap(y);
+    for (let i = 0; i < text.length; i++) {
+      const g = FONT[text.charAt(i)] || FONT[' '];
+      for (let row = 0; row < 8; row++) {
+        const bits = g[row];
+        for (let col = 0; col < 8; col++) {
+          if (bits & (128 >> col)) ctx.fillRect(cx + col * PX, cy + row * PX, PX, PX);
+        }
+      }
+      cx += ADV * PX;
+    }
+  }
+
+  function wrapLines(text, maxW) {
+    const maxChars = Math.max(1, Math.floor(maxW / (ADV * PX)));
+    const words = String(text).split(' ');
+    const lines = [];
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      let w = words[i];
+      while (w.length > maxChars) {
+        if (cur) { lines.push(cur); cur = ''; }
+        lines.push(w.slice(0, maxChars));
+        w = w.slice(maxChars);
+      }
+      if (!w) continue;
+      if (!cur) cur = w;
+      else if ((cur + ' ' + w).length <= maxChars) cur += ' ' + w;
+      else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [''];
+  }
+
+  function buttonSize(label, maxInner) {
+    const limit = Math.max(8 * PX, maxInner || (textW(label) + PX));
+    const lines = wrapLines(label, limit);
+    let w = 0;
+    for (let i = 0; i < lines.length; i++) w = Math.max(w, textW(lines[i]));
+    return { lines: lines, w: snap(w + 4 * PX), h: snap((lines.length * 8 + 4) * PX) };
+  }
+
+  function drawButton(x, y, w, h, lines, pressed) {
+    x = snap(x); y = snap(y); w = snap(w); h = snap(h);
+    ctx.fillStyle = INK;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = pressed ? MID : PAPER;
+    ctx.fillRect(x + PX, y + PX, Math.max(PX, w - 2 * PX), Math.max(PX, h - 2 * PX));
+    const th = lines.length * 8 * PX;
+    let ty = y + snap((h - th) / 2);
+    for (let i = 0; i < lines.length; i++) {
+      const tw = textW(lines[i]);
+      drawText(lines[i], x + snap((w - tw) / 2), ty, INK);
+      ty += 8 * PX;
+    }
+  }
+
+  function placeButton(x, y, id, label, forceW) {
+    const inner = forceW ? forceW - 4 * PX : textW(label);
+    const b = buttonSize(label, inner);
+    const w = forceW ? snap(forceW) : b.w;
+    const h = b.h;
+    drawButton(x, y, w, h, b.lines, ui.press === id);
+    const box = { id: id, x: snap(x), y: snap(y), w: w, h: h };
+    ui.hits.push(box);
+    return { x: box.x, y: box.y, w: w, h: h, bottom: box.y + h };
+  }
+
+  function drawPanel(x, y, w, h) {
+    x = snap(x); y = snap(y); w = snap(w); h = snap(h);
+    ctx.fillStyle = INK;
+    ctx.fillRect(x, y, w, h);
+    if (w > 2 * PX && h > 2 * PX) {
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(x + PX, y + PX, w - 2 * PX, h - 2 * PX);
+    }
+    return { x: x, y: y, w: w, h: h };
+  }
+
+  const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
+
+  function drawFooter() {
+    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
+    const h = (lines.length * 8 + 2) * PX;
+    const y = snap(state.viewH - h);
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
+    return y;
+  }
+
+  function drawHud() {
+    const y = PX;
+    const narrow = state.viewW < 560;
+    const dex = placeButton(PX, y, 'dex', 'DEX');
+    const battleLabel = narrow ? 'BTL' : 'BATTLE';
+    const bw = buttonSize(battleLabel).w;
+    const battle = placeButton(snap(state.viewW - bw - PX), y, 'battle', battleLabel);
+    const soundLabel = IslandAudio.isMuted() ? (narrow ? 'MUT' : 'MUTE') : (narrow ? 'SND' : 'SOUND');
+    const sw = buttonSize(soundLabel).w;
+    placeButton(snap(battle.x - sw - PX), y, 'sound', soundLabel);
+    const count = caughtCount() + '/15';
+    const cx = dex.x + dex.w + PX;
+    const roomRight = battle.x - sw - PX;
+    if (roomRight - cx >= textW(count) + 2 * PX) {
+      ctx.fillStyle = INK;
+      ctx.fillRect(cx, y, textW(count) + 2 * PX, 10 * PX);
+      drawText(count, cx + PX, y + PX, PAPER);
+    }
+    return Math.max(dex.bottom, battle.bottom);
+  }
+
+  function drawChip(footTop) {
+    const mon = enc.mon;
+    const sil = spriteSil[mon.id];
+    if (!sil) return;
+    const sw = sil.width * PX;
+    const sh = sil.height * PX;
+    const maxW = snap(Math.min(state.viewW - 2 * PX, Math.max(sw + 4 * PX, textW('CATCH!') + 8 * PX)));
+    const inner = maxW - 4 * PX;
+    const away = buttonSize('BACK AWAY', inner);
+    const cat = buttonSize('CATCH!', inner);
+    const h = snap(2 * PX + sh + PX + away.h + PX + cat.h + 2 * PX);
+    let y = snap(footTop - h - PX);
+    const minY = 16 * PX;
+    if (y < minY) y = minY;
+    const x = snap((state.viewW - maxW) / 2);
+    drawPanel(x, y, maxW, Math.min(h, footTop - y - PX));
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sil, 0, 0, sil.width, sil.height, snap(x + (maxW - sw) / 2), y + 2 * PX, sw, sh);
+    let by = y + 2 * PX + sh + PX;
+    const awayBtn = placeButton(x + 2 * PX, by, 'away', 'BACK AWAY', inner);
+    placeButton(x + 2 * PX, awayBtn.bottom + PX, 'catch', 'CATCH!', inner);
+  }
+
+  function drawBallAt(x, y) {
+    if (!ballCanvas) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(ballCanvas, 0, 0, ballCanvas.width, ballCanvas.height, snap(x), snap(y), BALL, BALL);
+  }
+
+  function drawTrail(pts, ox, oy) {
+    for (let i = 0; i < pts.length; i++) {
+      ctx.fillStyle = i % 2 ? '#f8f8f8' : '#e03030';
+      const px = snap(pts[i].x + (ox || 0));
+      const py = snap(pts[i].y + (oy || 0));
+      ctx.fillRect(px, py, PX * 2, PX * 2);
+    }
+  }
+
+  function drawMeter(x, y, w) {
+    const slots = 8;
+    const seg = 4 * PX;
+    const gap = PX;
+    const mw = slots * seg + (slots - 1) * gap;
+    let mx = snap(x + (w - mw) / 2);
+    const filled = Math.max(0, Math.min(slots, Math.round(Math.min(1, Math.abs(enc.spin) / 0.85) * slots)));
+    const curved = Math.abs(enc.spin) >= 0.85 || (enc.phase === 'flight' && enc.curved);
+    for (let i = 0; i < slots; i++) {
+      ctx.fillStyle = INK;
+      ctx.fillRect(mx, y, seg, 4 * PX);
+      ctx.fillStyle = i < filled ? (curved ? SHADE : MID) : PAPER;
+      ctx.fillRect(mx + PX, y + PX, seg - 2 * PX, 2 * PX);
+      mx += seg + gap;
+    }
+    const label = curved ? 'CURVE' : 'STRAIGHT';
+    drawText(label, snap(x + (w - textW(label)) / 2), y + 5 * PX, INK);
+  }
+
+  function drawThrow(footTop) {
+    const top = 16 * PX;
+    const x = PX;
+    const w = snap(state.viewW - 2 * PX);
+    const y = top;
+    const h = snap(Math.max(32 * PX, footTop - y - PX));
+    drawPanel(x, y, w, h);
+    const mon = enc.mon;
+    const img = spriteImg[mon.id];
+    const name = mon.name;
+    drawText(name, snap(x + (w - textW(name)) / 2), y + 2 * PX, INK);
+    drawText(mon.type, snap(x + (w - textW(mon.type)) / 2), y + 12 * PX, INK);
+    const sw = img.width * PX;
+    const sh = img.height * PX;
+    const showAway = enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled';
+    const awayH = showAway ? buttonSize('BACK AWAY', w - 4 * PX).h : 0;
+    const ballY = snap(y + h - awayH - BALL - 3 * PX);
+    const ballX = snap(x + (w - BALL) / 2);
+    ui.ballHome = { x: ballX, y: ballY, w: BALL, h: BALL };
+    ui.ballHit = { x: ballX - 4 * PX, y: ballY - 4 * PX, w: BALL + 8 * PX, h: BALL + 8 * PX };
+    if (enc.phase === 'aim' && !enc.drag) {
+      enc.bx = ballX;
+      enc.by = ballY;
+    }
+    let spriteY = y + 22 * PX;
+    if (spriteY + sh > ballY - 16 * PX) spriteY = snap(Math.max(y + 22 * PX, ballY - 16 * PX - sh));
+    const spriteX = snap(x + (w - sw) / 2);
+    ui.mon = { x: spriteX, y: spriteY, w: sw, h: sh };
+    if (!enc.hideMon) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, img.width, img.height, spriteX, spriteY, sw, sh);
+    }
+    if (enc.phase === 'caught') {
+      for (let i = 0; i < enc.stars.length; i++) {
+        if (Math.floor(enc.holdT * 8) % 2 === i % 2) continue;
+        ctx.fillStyle = INK;
+        ctx.fillRect(enc.stars[i].x, enc.stars[i].y, PX * 2, PX * 2);
+      }
+    }
+    const meterY = snap(ballY - 12 * PX);
+    if (enc.phase === 'aim' || enc.phase === 'flight') drawMeter(x, meterY, w);
+    let status = enc.note || 'FLICK UP';
+    if (enc.phase === 'caught') status = 'GOTCHA! ' + name;
+    else if (enc.phase === 'fled') status = name + ' FLED!';
+    else if (enc.phase === 'flight') status = enc.curved ? 'CURVE BALL' : 'STRAIGHT';
+    else if (enc.phase === 'shake') status = enc.curved ? 'CURVE BALL' : 'STRAIGHT';
+    else if (enc.drag && Math.abs(enc.spin) >= 0.85) status = 'CURVE';
+    const lines = wrapLines(status, w - 4 * PX).slice(0, 2);
+    for (let i = 0; i < lines.length; i++) {
+      drawText(lines[i], snap(x + (w - textW(lines[i])) / 2), meterY - (lines.length - i) * 8 * PX - PX, INK);
+    }
+    if (enc.phase === 'shake' && ui.mon) {
+      const dir = Math.floor(enc.shakeT / 0.08) % 2 ? -2 : 2;
+      drawBallAt(ui.mon.x + ui.mon.w / 2 - BALL / 2 + dir * PX, ui.mon.y + ui.mon.h / 2 - BALL / 2);
+    } else if (enc.phase !== 'caught' && enc.phase !== 'fled') {
+      if (enc.phase === 'flight') drawTrail(enc.trail, BALL / 2, BALL / 2);
+      else if (enc.drag) drawTrail(enc.pts, 0, 0);
+      drawBallAt(enc.bx, enc.by);
+    }
+    if (showAway) placeButton(x + 2 * PX, snap(y + h - awayH - PX), 'away', enc.phase === 'aim' ? 'BACK AWAY' : 'WALK', w - 4 * PX);
+  }
+
+  function drawDex(footTop) {
+    const x = PX;
+    const y = 16 * PX;
+    const w = snap(state.viewW - 2 * PX);
+    const h = snap(Math.max(40 * PX, footTop - y - PX));
+    drawPanel(x, y, w, h);
+    const title = 'POKEDEX ' + caughtCount() + '/15';
+    const titleLines = wrapLines(title, w - 4 * PX);
+    for (let i = 0; i < titleLines.length; i++) {
+      drawText(titleLines[i], x + 2 * PX, y + 2 * PX + i * 8 * PX, INK);
+    }
+    const btnH = buttonSize('OK').h;
+    const by = snap(y + h - btnH - 2 * PX);
+    const bw = snap((w - 8 * PX) / 3);
+    const listTop = y + 2 * PX + titleLines.length * 8 * PX + PX;
+    const rowH = 10 * PX;
+    const rows = Math.max(1, Math.floor((by - PX - listTop) / rowH));
+    const maxScroll = Math.max(0, D.species.length - rows);
+    if (dexScroll > maxScroll) dexScroll = maxScroll;
+    if (dexScroll < 0) dexScroll = 0;
+    for (let i = 0; i < rows; i++) {
+      const s = D.species[i + dexScroll];
+      if (!s) break;
+      const have = dex.indexOf(s.id) >= 0;
+      drawText(have ? s.name : '???', x + 2 * PX, listTop + i * rowH, have ? INK : SHADE);
+    }
+    placeButton(x + 2 * PX, by, 'dexup', 'UP', bw);
+    placeButton(x + 4 * PX + bw, by, 'dexdown', 'DN', bw);
+    placeButton(x + 6 * PX + bw * 2, by, 'dexclose', 'OK', bw);
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, 0, state.viewW, state.viewH);
+    const foot = drawFooter();
+    let y = 2 * PX;
+    const a = 'POKEMON';
+    const b = 'GO ISLAND';
+    drawText(a, snap((state.viewW - textW(a)) / 2), y, PAPER);
+    y += 10 * PX;
+    drawText(b, snap((state.viewW - textW(b)) / 2), y, PAPER);
+    y += 12 * PX;
+    const pics = [];
+    if (redPic) pics.push(redPic);
+    if (spriteImg.bulbasaur) pics.push(spriteImg.bulbasaur);
+    const need = 3 * 16 * PX;
+    const gap = PX;
+    let rowW = 0;
+    let rowH = 0;
+    for (let i = 0; i < pics.length; i++) {
+      rowW += pics[i].width * PX + gap;
+      rowH = Math.max(rowH, pics[i].height * PX);
+    }
+    ctx.imageSmoothingEnabled = false;
+    if (pics.length && y + rowH + need < foot && rowW < state.viewW - PX) {
+      let x = snap((state.viewW - rowW) / 2);
+      for (let i = 0; i < pics.length; i++) {
+        const im = pics[i];
+        const w = im.width * PX;
+        const h = im.height * PX;
+        ctx.drawImage(im, 0, 0, im.width, im.height, x, y, w, h);
+        x += w + gap;
+      }
+      y += rowH + 2 * PX;
+    } else if (spriteImg.bulbasaur && y + spriteImg.bulbasaur.height * PX + need < foot) {
+      const im = spriteImg.bulbasaur;
+      const w = im.width * PX;
+      const h = im.height * PX;
+      ctx.drawImage(im, 0, 0, im.width, im.height, snap((state.viewW - w) / 2), y, w, h);
+      y += h + 2 * PX;
+    }
+    if (!ready) {
+      const label = bootError ? 'ASSET ERROR' : 'LOADING';
+      drawText(label, snap((state.viewW - textW(label)) / 2), y, PAPER);
+      return foot;
+    }
+    const startW = buttonSize('START').w;
+    if (y + 16 * PX < foot) {
+      placeButton(snap((state.viewW - startW) / 2), y, 'start', 'START');
+      y += 16 * PX;
+    }
+    const soundLabel = IslandAudio.isMuted() ? 'SOUND OFF' : 'SOUND ON';
+    const sw = buttonSize(soundLabel).w;
+    if (y + 16 * PX < foot) {
+      placeButton(snap((state.viewW - sw) / 2), y, 'sound', soundLabel);
+      y += 16 * PX;
+    }
+    const battleW = buttonSize('BATTLE').w;
+    if (y + 14 * PX < foot) placeButton(snap((state.viewW - battleW) / 2), y, 'battle', 'BATTLE');
+    return foot;
+  }
+
+  function drawPixelUI() {
+    ui.hits = [];
+    ui.mon = null;
+    if (state.mode !== 'throw') {
+      ui.ballHome = null;
+      ui.ballHit = null;
+    }
+    if (state.mode === 'title') {
+      drawTitle();
+      return;
+    }
+    drawHud();
+    const foot = drawFooter();
+    if (state.mode === 'dex') {
+      drawDex(foot);
+      return;
+    }
+    if (state.mode === 'throw') {
+      drawThrow(foot);
+      return;
+    }
+    if (enc.phase === 'chip') drawChip(foot);
+    else if (state.moved < 80) {
+      const msg = 'HOLD GROUND TO WALK';
+      const tw = textW(msg);
+      const x = snap((state.viewW - tw) / 2 - 2 * PX);
+      const y = 16 * PX;
+      drawPanel(x, y, tw + 4 * PX, 12 * PX);
+      drawText(msg, x + 2 * PX, y + 2 * PX, INK);
+    }
+  }
+
+  function activate(id) {
+    if (id === 'start') { startGame(); return; }
+    if (id === 'sound') {
+      IslandAudio.toggle();
+      IslandAudio.click();
+      return;
+    }
+    if (id === 'battle') { window.location.href = '../'; return; }
+    if (id === 'dex') {
+      if (state.mode === 'explore') openDex();
+      return;
+    }
+    if (id === 'dexclose') { IslandAudio.click(); closeDex(); return; }
+    if (id === 'dexup') { dexScroll = Math.max(0, dexScroll - 1); IslandAudio.click(); return; }
+    if (id === 'dexdown') { dexScroll += 1; IslandAudio.click(); return; }
+    if (id === 'away') {
+      if (enc.phase === 'chip' || enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled') {
+        IslandAudio.click();
+        endEncounter();
+      }
+      return;
+    }
+    if (id === 'catch' && enc.phase === 'chip') beginThrow();
+  }
+
+  function onThrowDown(e, x, y, id) {
+    if (enc.phase === 'caught' || enc.phase === 'fled') {
+      if (id === 'away') ui.press = 'away';
+      else endEncounter();
+      return;
+    }
+    if (id === 'away' && enc.phase === 'aim') {
+      ui.press = 'away';
+      return;
+    }
+    if (enc.phase !== 'aim' || !ui.ballHit) return;
+    const hit = ui.ballHit;
+    const cx = hit.x + hit.w / 2;
+    const cy = hit.y + hit.h / 2;
+    if (Math.hypot(x - cx, y - cy) > hit.w) return;
+    enc.drag = true;
+    enc.spin = 0;
+    enc.note = '';
+    enc.pts = [{ x: x, y: y, t: performance.now() }];
+    enc.last = { x: x, y: y };
+    enc.bx = x - BALL / 2;
+    enc.by = y - BALL / 2;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  }
+
+  function noteSpin(x, y) {
+    const prev = enc.last;
+    enc.last = { x: x, y: y };
+    if (!prev || !ui.ballHome) return;
+    const ox = ui.ballHome.x + BALL / 2;
+    const oy = ui.ballHome.y + BALL / 2;
+    const ax = prev.x - ox, ay = prev.y - oy;
+    const bx = x - ox, by = y - oy;
+    const minR = 6 * PX;
+    if (ax * ax + ay * ay < minR * minR || bx * bx + by * by < minR * minR) return;
+    enc.spin += Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+    if (enc.spin > 6) enc.spin = 6;
+    if (enc.spin < -6) enc.spin = -6;
+  }
+
+  function releaseThrow() {
+    const pts = enc.pts;
+    enc.drag = false;
+    if (enc.phase !== 'aim' || !pts || pts.length < 2) {
+      enc.spin = 0;
+      return;
+    }
+    const b = pts[pts.length - 1];
+    let i = pts.length - 1;
+    while (i > 0 && b.t - pts[i - 1].t < 90) i--;
+    const a = pts[i];
+    const dt = Math.max(0.016, (b.t - a.t) / 1000);
+    let vx = (b.x - a.x) / dt;
+    let vy = (b.y - a.y) / dt;
+    const speed = Math.hypot(vx, vy);
+    if (speed < 420 || vy > -60) {
+      enc.spin = 0;
+      enc.note = 'FLICK UP';
+      return;
+    }
+    const maxS = 1600;
+    if (speed > maxS) {
+      vx *= maxS / speed;
+      vy *= maxS / speed;
+    }
+    enc.vx = vx;
+    enc.vy = vy;
+    enc.curved = Math.abs(enc.spin) >= 0.85;
+    if (!enc.curved) enc.spin = 0;
+    enc.phase = 'flight';
+    enc.flightT = 0;
+    enc.trail = [{ x: snap(enc.bx), y: snap(enc.by) }];
+    enc.note = '';
+    IslandAudio.throwBall();
+  }
+
+  function stepThrow(dt) {
+    if (state.mode !== 'throw') return;
+    if (enc.phase === 'flight') {
+      const curve = Math.max(-1, Math.min(1, enc.spin / 1.6));
+      const px = -enc.vy;
+      const py = enc.vx;
+      const plen = Math.hypot(px, py) || 1;
+      const accel = curve * 2200;
+      enc.vx += (px / plen) * accel * dt;
+      enc.vy += (py / plen) * accel * dt;
+      enc.vy += 900 * dt;
+      enc.bx += enc.vx * dt;
+      enc.by += enc.vy * dt;
+      enc.flightT += dt;
+      const last = enc.trail[enc.trail.length - 1];
+      const sx = snap(enc.bx);
+      const sy = snap(enc.by);
+      if (!last || Math.hypot(sx - last.x, sy - last.y) >= PX * 2) enc.trail.push({ x: sx, y: sy });
+      if (enc.trail.length > 18) enc.trail.shift();
+      const mon = ui.mon;
+      const cx = enc.bx + BALL / 2;
+      const cy = enc.by + BALL / 2;
+      const home = ui.ballHome;
+      const hand = home && Math.hypot(cx - (home.x + BALL / 2), cy - (home.y + BALL / 2)) < BALL;
+      if (!hand && mon && cx >= mon.x && cx < mon.x + mon.w && cy >= mon.y && cy < mon.y + mon.h) {
+        landBall();
+        return;
+      }
+      if (enc.flightT > 1.8 || enc.by > state.viewH + 8 || enc.bx < -80 || enc.bx > state.viewW + 80 ||
+          (enc.flightT > 0.45 && home && enc.vy > 0 && enc.by > home.y + BALL)) {
+        missBall();
+      }
+    } else if (enc.phase === 'shake') {
+      enc.shakeT += dt;
+      if (enc.shakeT >= 0.34) {
+        enc.shakeT = 0;
+        enc.shakes--;
+        if (enc.shakes <= 0) {
+          if (enc.success) onCaught();
+          else onBroke();
+        }
+      }
+    } else if (enc.phase === 'caught' || enc.phase === 'fled') {
+      enc.holdT += dt;
+      if (enc.holdT > 1.7) endEncounter();
+    }
   }
 
   function startEncounter(biomeName) {
     const mon = pickSpecies(biomeName);
-    enc.phase = 'intro';
+    enc.phase = 'chip';
     enc.mon = mon;
-    enc.charge = 0;
     enc.tries = 0;
-    enc.t0 = performance.now();
+    enc.spin = 0;
+    enc.curved = false;
     enc.success = false;
+    enc.hideMon = false;
+    enc.note = '';
+    enc.stars = [];
+    enc.drag = false;
+    enc.ax = state.x;
+    enc.ay = state.y;
     state.path = [];
     state.hold = false;
-    state.mode = 'encounter';
-    els.encLine.textContent = 'A wild ' + mon.name + ' appeared!';
-    els.encSprite.src = mon.sprite;
-    els.encSprite.alt = mon.name;
-    els.encSprite.className = mon.id === 'bulbasaur' ? 'bro pop' : 'pop';
-    els.encType.textContent = mon.type;
-    els.encType.className = 'tag ' + mon.type;
-    els.encSub.textContent = 'Hold the ball, then let go.';
-    els.ballLabel.textContent = 'HOLD TO THROW';
-    els.charge.style.width = '0%';
-    els.encActions.hidden = true;
-    showBallUI(true);
-    els.stars.innerHTML = '';
-    els.encounter.hidden = false;
-    updateArc(0);
     IslandAudio.encounter();
-    setTimeout(function () { if (enc.phase === 'intro') enc.phase = 'ready'; }, 520);
   }
 
-  function updateArc(charge) {
-    const y = 96 - charge * 70;
-    const x = 150;
-    const endX = 150;
-    const endY = 18 + (1 - charge) * 36;
-    els.arcPath.setAttribute('d', 'M 150 96 Q ' + x + ' ' + y.toFixed(1) + ' ' + endX + ' ' + endY.toFixed(1));
-    els.arcBall.setAttribute('cx', String(endX));
-    els.arcBall.setAttribute('cy', endY.toFixed(1));
-    els.charge.style.width = Math.round(charge * 100) + '%';
+  function beginThrow() {
+    enc.phase = 'aim';
+    enc.tries = 0;
+    enc.spin = 0;
+    enc.curved = false;
+    enc.drag = false;
+    enc.hideMon = false;
+    enc.note = '';
+    enc.trail = [];
+    enc.stars = [];
+    state.mode = 'throw';
+    state.path = [];
+    state.hold = false;
+    IslandAudio.click();
   }
 
-  function endEncounter(why) {
+  function endEncounter() {
     enc.phase = 'idle';
+    enc.mon = null;
+    enc.drag = false;
+    enc.hideMon = false;
+    enc.stars = [];
+    enc.note = '';
     state.mode = 'explore';
     state.cooldown = 4.4;
     state.steps = 0;
-    els.encounter.hidden = true;
-    els.throwBall.classList.remove('show', 'shake');
-    els.encCard.classList.remove('flash');
-    if (enc.openDexAfter) {
-      enc.openDexAfter = false;
-      openDex();
-    }
   }
 
-  function catchChance(mon, charge) {
+  function catchChance(mon, curved) {
     const easy = mon.catch >= 200 ? 0.8 : mon.catch >= 150 ? 0.66 : 0.48;
-    return Math.min(0.93, easy * (0.55 + 0.62 * charge));
-  }
-
-  function onBallDown(e) {
-    if (enc.phase !== 'ready') return;
-    e.preventDefault();
-    IslandAudio.unlock();
-    els.ball.setPointerCapture(e.pointerId);
-    enc.phase = 'charging';
-    enc.chargeT = performance.now();
-    enc.charge = 0;
-    els.ball.classList.add('charging');
-    els.ballLabel.textContent = 'RELEASE!';
-  }
-  function onBallUp(e) {
-    if (enc.phase !== 'charging') return;
-    e.preventDefault();
-    els.ball.classList.remove('charging');
-    const charge = enc.charge;
-    throwBall(charge);
-  }
-
-  function throwBall(charge) {
-    enc.phase = 'throwing';
-    enc.charge = charge;
-    IslandAudio.throwBall();
-    const miss = charge < 0.18;
-    const from = els.ball.getBoundingClientRect();
-    const mon = els.encSprite.getBoundingClientRect();
-    const x0 = from.left + from.width / 2 - 14;
-    const y0 = from.top + 10;
-    const x1 = mon.left + mon.width / 2 - 14;
-    const y1 = mon.top + mon.height / 2 - 14;
-    const endX = miss ? x0 + (x1 - x0) * 0.45 : x1;
-    const endY = miss ? y0 + (y1 - y0) * 0.35 + 30 : y1;
-    const cx = (x0 + endX) / 2;
-    const cy = Math.min(y0, endY) - (50 + charge * 110);
-    const ball = els.throwBall;
-    ball.classList.add('show');
-    const t0 = performance.now();
-    const dur = 460;
-    function step(now) {
-      const t = Math.min(1, (now - t0) / dur);
-      const u = 1 - t;
-      const x = u * u * x0 + 2 * u * t * cx + t * t * endX;
-      const y = u * u * y0 + 2 * u * t * cy + t * t * endY;
-      ball.style.left = x + 'px';
-      ball.style.top = y + 'px';
-      if (t < 1) requestAnimationFrame(step);
-      else if (miss) {
-        ball.classList.remove('show');
-        enc.tries++;
-        els.encLine.textContent = 'The ball missed!';
-        els.encSub.textContent = triesLine();
-        maybeFlee(false);
-      } else landBall();
-    }
-    requestAnimationFrame(step);
-  }
-
-  function triesLine() {
-    if (enc.tries >= 3) return 'It looks ready to flee.';
-    return 'Throw ' + (enc.tries + 1) + ' · it may flee after 3 fails';
+    return Math.min(0.93, easy * (curved ? 1 : 0.86));
   }
 
   function landBall() {
-    const p = catchChance(enc.mon, enc.charge);
+    enc.phase = 'shake';
+    enc.hideMon = true;
+    enc.trail = [];
+    const p = catchChance(enc.mon, enc.curved);
     enc.success = Math.random() < p;
     enc.shakes = enc.success ? 3 : (Math.random() < 0.5 ? 1 : 2);
-    els.encSprite.classList.add('hide-mon');
-    shakeNext();
+    enc.shakeT = 0;
   }
 
-  function shakeNext() {
-    if (enc.shakes <= 0) {
-      els.throwBall.classList.remove('show', 'shake');
-      if (enc.success) onCaught();
-      else onBroke();
-      return;
-    }
-    enc.shakes--;
-    enc.phase = 'shaking';
-    els.throwBall.classList.remove('shake');
-    void els.throwBall.offsetWidth;
-    els.throwBall.classList.add('shake');
-    setTimeout(shakeNext, 320);
+  function missBall() {
+    enc.trail = [];
+    enc.tries++;
+    enc.note = 'THE BALL MISSED!';
+    enc.phase = 'aim';
+    enc.spin = 0;
+    enc.drag = false;
+    maybeFlee();
+  }
+
+  function onBroke() {
+    enc.hideMon = false;
+    enc.tries++;
+    IslandAudio.broke();
+    enc.note = enc.mon.name + ' BROKE FREE!';
+    enc.phase = 'aim';
+    enc.spin = 0;
+    maybeFlee();
+  }
+
+  function maybeFlee() {
+    const flee = enc.tries >= 4 || (enc.tries >= 3 && Math.random() < 0.7);
+    if (!flee) return;
+    enc.phase = 'fled';
+    enc.hideMon = false;
+    enc.holdT = 0;
+    enc.note = '';
+    IslandAudio.fled();
   }
 
   function onCaught() {
     enc.phase = 'caught';
+    enc.hideMon = false;
+    enc.holdT = 0;
     if (dex.indexOf(enc.mon.id) < 0) dex.push(enc.mon.id);
     saveDex();
-    refreshHud();
     IslandAudio.caught();
-    els.encSprite.classList.remove('hide-mon');
-    els.encLine.textContent = 'Gotcha! ' + enc.mon.name + ' was caught!';
-    els.encSub.textContent = caughtCount() + ' / 15 in the Pokédex.';
-    els.encCard.classList.add('flash');
-    showBallUI(false);
-    els.encActions.hidden = false;
     burst();
   }
 
-  function onBroke() {
-    enc.tries++;
-    els.encSprite.classList.remove('hide-mon');
-    IslandAudio.broke();
-    els.encLine.textContent = enc.mon.name + ' broke free!';
-    els.encSub.textContent = triesLine();
-    maybeFlee(true);
-  }
-
-  function maybeFlee(fromBreak) {
-    const flee = enc.tries >= 4 || (enc.tries >= 3 && Math.random() < 0.7);
-    if (flee) {
-      enc.phase = 'fled';
-      IslandAudio.fled();
-      els.encLine.textContent = 'The wild ' + enc.mon.name + ' fled!';
-      els.encSub.textContent = 'It got away.';
-      showBallUI(false);
-      els.encActions.hidden = false;
-      els.encDex.textContent = 'POKéDEX';
-      return;
-    }
-    enc.phase = 'ready';
-    els.ballLabel.textContent = 'HOLD TO THROW';
-    if (!fromBreak) els.encSub.textContent = triesLine();
-  }
-
   function burst() {
-    els.stars.innerHTML = '';
-    for (let i = 0; i < 16; i++) {
-      const s = document.createElement('i');
-      s.style.left = (15 + Math.random() * 70) + '%';
-      s.style.top = (8 + Math.random() * 55) + '%';
-      s.style.animationDelay = (Math.random() * 0.12) + 's';
-      els.stars.appendChild(s);
+    enc.stars = [];
+    const m = ui.mon;
+    if (!m) return;
+    for (let i = 0; i < 12; i++) {
+      enc.stars.push({
+        x: snap(m.x + Math.random() * m.w),
+        y: snap(m.y + Math.random() * m.h),
+      });
     }
   }
 
   function openDex() {
-    if (state.mode === 'encounter') return;
+    if (state.mode !== 'explore') return;
     IslandAudio.book();
     state.path = [];
-    const prev = state.mode;
+    state.hold = false;
     state.mode = 'dex';
-    const n = caughtCount();
-    els.dexTitle.textContent = 'POKéDEX ' + n + '/15';
-    els.dexGrid.innerHTML = '';
-    D.species.forEach(function (s) {
-      const cell = document.createElement('div');
-      const have = dex.indexOf(s.id) >= 0;
-      cell.className = 'dex-cell' + (have ? '' : ' missing');
-      if (have) {
-        const img = document.createElement('img');
-        img.src = s.sprite;
-        img.alt = s.name;
-        cell.appendChild(img);
-        const nm = document.createElement('div');
-        nm.className = 'nm';
-        nm.textContent = s.name;
-        cell.appendChild(nm);
-      } else {
-        const q = document.createElement('div');
-        q.className = 'q';
-        q.textContent = '?';
-        cell.appendChild(q);
-        const nm = document.createElement('div');
-        nm.className = 'nm';
-        nm.textContent = '???';
-        cell.appendChild(nm);
-      }
-      els.dexGrid.appendChild(cell);
-    });
-    els.dex.hidden = false;
-    els.dex.dataset.prev = prev;
+    dexScroll = 0;
   }
   function closeDex() {
-    els.dex.hidden = true;
     if (state.mode === 'dex') state.mode = 'explore';
   }
-
-  function syncSoundButtons() { refreshHud(); }
 
   let last = performance.now();
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    if (enc.phase === 'charging') {
-      enc.charge = Math.min(1, (now - enc.chargeT) / 900);
-      updateArc(enc.charge);
-    }
-    if (state.mode === 'explore' || state.mode === 'encounter' || state.mode === 'dex') {
-      update(dt);
+    if (bootError && !ready) {
+      if (!state.viewW) resize();
+      ctx.fillStyle = INK;
+      ctx.fillRect(0, 0, state.viewW, state.viewH);
+      drawText('ASSET ERROR', 2 * PX, 2 * PX, PAPER);
+    } else if (ready && waterFrames) {
+      waterTick++;
+      if (waterTick >= 20) {
+        waterTick = 0;
+        waterFrame = (waterFrame + 1) % waterFrames.length;
+      }
+      stepThrow(dt);
+      if (state.mode === 'explore') update(dt);
       render();
     }
     requestAnimationFrame(frame);
   }
 
   function startGame() {
+    if (!ready) return;
     IslandAudio.unlock();
     IslandAudio.click();
     state.mode = 'explore';
-    els.title.classList.remove('on');
-    els.play.classList.add('on');
     resize();
-    refreshHud();
   }
 
   function wire() {
@@ -784,36 +1342,6 @@
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     window.addEventListener('resize', resize);
-
-    els.start.addEventListener('click', startGame);
-    function toggleSound() {
-      IslandAudio.unlock();
-      IslandAudio.toggle();
-      IslandAudio.click();
-      syncSoundButtons();
-    }
-    els.sound.addEventListener('click', toggleSound);
-    els.mute.addEventListener('click', toggleSound);
-    els.dexBtn.addEventListener('click', function () {
-      IslandAudio.unlock();
-      if (state.mode === 'explore') openDex();
-    });
-    els.dexClose.addEventListener('click', function () { IslandAudio.click(); closeDex(); });
-
-    els.ball.addEventListener('pointerdown', onBallDown, { passive: false });
-    els.ball.addEventListener('pointerup', onBallUp);
-    els.ball.addEventListener('pointercancel', onBallUp);
-    els.encAway.addEventListener('click', function () {
-      if (enc.phase === 'throwing' || enc.phase === 'shaking') return;
-      IslandAudio.click();
-      endEncounter('away');
-    });
-    els.encGo.addEventListener('click', function () { IslandAudio.click(); endEncounter('go'); });
-    els.encDex.addEventListener('click', function () {
-      IslandAudio.click();
-      enc.openDexAfter = true;
-      endEncounter('dex');
-    });
   }
 
   // Four muted DMG shades. Every overworld pixel is one of these — no tint blend.
@@ -845,10 +1373,139 @@
     return c;
   }
 
+  function pixCanvas(data) {
+    const c = document.createElement('canvas');
+    c.width = 8;
+    c.height = 8;
+    const g = c.getContext('2d');
+    const im = g.createImageData(8, 8);
+    im.data.set(data);
+    g.putImageData(im, 0, 0);
+    return c;
+  }
+  function sliceTile(canvas, tid) {
+    const c = document.createElement('canvas');
+    c.width = 8;
+    c.height = 8;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = false;
+    g.drawImage(canvas, (tid % 16) * 8, ((tid / 16) | 0) * 8, 8, 8, 0, 0, 8, 8);
+    return c;
+  }
+  function tileData(c) {
+    return c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, 8, 8).data;
+  }
+  function rotCW(src) {
+    const o = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const si = (y * 8 + x) * 4;
+        const di = (x * 8 + (7 - y)) * 4;
+        o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2]; o[di + 3] = src[si + 3];
+      }
+    }
+    return o;
+  }
+  function rotCCW(src) {
+    const o = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const si = (y * 8 + x) * 4;
+        const di = ((7 - x) * 8 + y) * 4;
+        o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2]; o[di + 3] = src[si + 3];
+      }
+    }
+    return o;
+  }
+  function flipV(src) {
+    const o = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const si = (y * 8 + x) * 4;
+        const di = ((7 - y) * 8 + x) * 4;
+        o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2]; o[di + 3] = src[si + 3];
+      }
+    }
+    return o;
+  }
+  function darker(a, b) {
+    const o = new Uint8ClampedArray(a.length);
+    for (let i = 0; i < a.length; i += 4) {
+      const sa = a[i] + a[i + 1] + a[i + 2];
+      const sb = b[i] + b[i + 1] + b[i + 2];
+      const use = sa <= sb ? a : b;
+      o[i] = use[i]; o[i + 1] = use[i + 1]; o[i + 2] = use[i + 2]; o[i + 3] = 255;
+    }
+    return o;
+  }
+  function shiftPix(src, dir) {
+    const o = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const sx = (x - dir + 8) % 8;
+        const si = (y * 8 + sx) * 4;
+        const di = (y * 8 + x) * 4;
+        o[di] = src[si]; o[di + 1] = src[si + 1]; o[di + 2] = src[si + 2]; o[di + 3] = src[si + 3];
+      }
+    }
+    return o;
+  }
+  function buildShoreAndWater(ow) {
+    const s = tileData(sliceTile(ow, 49));
+    const n = flipV(s);
+    const e = rotCCW(s);
+    const w = rotCW(s);
+    shore = {
+      s: pixCanvas(s), n: pixCanvas(n), e: pixCanvas(e), w: pixCanvas(w),
+      se: pixCanvas(darker(s, e)), sw: pixCanvas(darker(s, w)),
+      ne: pixCanvas(darker(n, e)), nw: pixCanvas(darker(n, w)),
+    };
+    let cur = tileData(sliceTile(ow, 20));
+    const frames = [pixCanvas(cur)];
+    const seq = [1, 1, 1, -1, -1, -1, -1, 1];
+    for (let i = 0; i < seq.length; i++) {
+      cur = shiftPix(cur, seq[i]);
+      frames.push(pixCanvas(cur));
+    }
+    waterFrames = frames.slice(0, 8);
+    waterFrame = 0;
+  }
+  function keyedSprite(img) {
+    const c = document.createElement('canvas');
+    c.width = img.width;
+    c.height = img.height;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    const im = g.getImageData(0, 0, c.width, c.height);
+    const d = im.data;
+    if (d[0] > 240 && d[1] > 240 && d[2] > 240 && d[3] > 240) {
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) d[i + 3] = 0;
+      }
+      g.putImageData(im, 0, 0);
+    }
+    return c;
+  }
+  function silhouetteOf(src) {
+    const c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, 0, 0);
+    const im = g.getImageData(0, 0, c.width, c.height);
+    const d = im.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 16) continue;
+      d[i] = 8; d[i + 1] = 24; d[i + 2] = 32; d[i + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+    return c;
+  }
+
   async function boot() {
     buildMap();
     wire();
-    syncSoundButtons();
+    resize();
     try {
       const src = {
         ow: 'assets/red/tiles/overworld.png',
@@ -869,20 +1526,18 @@
       // Interior sheets stay loaded with the Red set. Outdoor cells do not draw them.
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
       playerCanvas = paint(imgs[keys.length], RED_SPRITE);
-      const portrait = paint(imgs[keys.length + 1], RED_PIC);
-      const ball = paint(imgs[keys.length + 2], RED_SPRITE);
-      const ballURL = ball.toDataURL();
-      document.querySelectorAll('#ball img, #throw-ball').forEach(function (el) { el.src = ballURL; });
-      const face = document.getElementById('red-portrait');
-      if (face) {
-        face.src = portrait.toDataURL();
-        face.hidden = false;
-      }
-      els.start.disabled = false;
-      els.start.textContent = 'START';
+      redPic = paint(imgs[keys.length + 1], RED_PIC);
+      ballCanvas = paint(imgs[keys.length + 2], RED_SPRITE);
+      buildShoreAndWater(sheets.ow);
+      const speciesImgs = imgs.slice(keys.length + 3);
+      D.species.forEach(function (s, i) {
+        spriteImg[s.id] = keyedSprite(speciesImgs[i]);
+        spriteSil[s.id] = silhouetteOf(spriteImg[s.id]);
+      });
+      ready = true;
     } catch (err) {
       console.error(err);
-      els.start.textContent = 'ASSET ERROR';
+      bootError = true;
     }
     requestAnimationFrame(frame);
   }

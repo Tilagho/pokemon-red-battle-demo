@@ -12,8 +12,8 @@ The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprit
 
 | Use | File |
 | --- | --- |
-| Meadow, tall grass, path, town, water, waterfall, houses, flowers | `tiles/overworld.png` |
-| Shore dock | `tiles/ship_port.png` |
+| Meadow, tall grass, path, town, water, waterfall, shore lip, houses, flowers | `tiles/overworld.png` |
+| Ship port sheet (loaded, not the live coastline) | `tiles/ship_port.png` |
 | Forest and dark forest, plus forest trees | `tiles/forest.png` |
 | Mountain, ruins, dojo yard, volcanic floor, rocks | `tiles/plateau.png` |
 | Dirt and ice floor | `tiles/cavern.png` |
