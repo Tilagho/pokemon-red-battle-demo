@@ -90,7 +90,9 @@
   D.species.forEach(function (s) { speciesById[s.id] = s; });
 
   const canvas = document.getElementById('view');
-  const ctx = canvas.getContext('2d');
+  /* Opaque backing store. A translucent canvas on iOS composites stale frames. */
+  const ctx = canvas.getContext('2d', { alpha: false });
+  let DPR = 1;
   const INK = '#081820';
   const PAPER = '#e0f8d0';
   const MID = '#88c070';
@@ -322,29 +324,142 @@
     });
   }
 
+  /* 1, 2, or 3 so each CSS pixel is a whole device pixel. A 2× buffer on a
+     3× iPhone is a 1.5× resample, which shears the 4× grid into seams. */
+  function deviceScale() {
+    const raw = window.devicePixelRatio || 1;
+    if (raw >= 2.75) return 3;
+    if (raw >= 1.5) return 2;
+    return 1;
+  }
+  function viewPixels() {
+    const vv = window.visualViewport;
+    const w = vv ? vv.width : window.innerWidth;
+    const h = vv ? vv.height : window.innerHeight;
+    return [Math.max(1, Math.round(w)), Math.max(1, Math.round(h))];
+  }
+  function crisp() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.msImageSmoothingEnabled = false;
+  }
   function resize() {
-    // Fractional device pixels smear a 4× Game Boy grid. Stay on 1× or 2×.
-    const dpr = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
-    const w = window.innerWidth, h = window.innerHeight;
-    canvas.width = Math.max(1, Math.floor(w * dpr));
-    canvas.height = Math.max(1, Math.floor(h * dpr));
+    DPR = deviceScale();
+    const box = viewPixels();
+    const w = box[0], h = box[1];
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
+    const vv = window.visualViewport;
+    if (vv) {
+      canvas.style.left = Math.round(vv.offsetLeft) + 'px';
+      canvas.style.top = Math.round(vv.offsetTop) + 'px';
+    }
     state.viewW = w;
     state.viewH = h;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    crisp();
+  }
+
+  /* Nearest-neighbor upscale onto its own canvas. Drawing a crop out of the
+     atlas lets Safari sample the next tile and stamp a dark vertical bar. */
+  function scaleNN(src, sx, sy, sw, sh, scale) {
+    const sc = src.getContext('2d', { willReadFrequently: true });
+    const srcData = sc.getImageData(sx, sy, sw, sh).data;
+    const staged = document.createElement('canvas');
+    staged.width = sw * scale;
+    staged.height = sh * scale;
+    const g = staged.getContext('2d');
+    const image = g.createImageData(staged.width, staged.height);
+    const d = image.data;
+    const dw = staged.width;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const si = (y * sw + x) * 4;
+        const r = srcData[si], gc = srcData[si + 1], b = srcData[si + 2], a = srcData[si + 3];
+        for (let py = 0; py < scale; py++) {
+          const row = (y * scale + py) * dw;
+          for (let px = 0; px < scale; px++) {
+            const di = (row + x * scale + px) * 4;
+            d[di] = r; d[di + 1] = gc; d[di + 2] = b; d[di + 3] = a;
+          }
+        }
+      }
+    }
+    g.putImageData(image, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = staged.width;
+    out.height = staged.height;
+    const og = out.getContext('2d');
+    og.imageSmoothingEnabled = false;
+    og.drawImage(staged, 0, 0);
+    return out;
+  }
+  function flipCanvas(src) {
+    const w = src.width, h = src.height;
+    const s = src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+    const staged = document.createElement('canvas');
+    staged.width = w;
+    staged.height = h;
+    const g = staged.getContext('2d');
+    const image = g.createImageData(w, h);
+    const d = image.data;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const si = (y * w + x) * 4;
+        const di = (y * w + (w - 1 - x)) * 4;
+        d[di] = s[si]; d[di + 1] = s[si + 1]; d[di + 2] = s[si + 2]; d[di + 3] = s[si + 3];
+      }
+    }
+    g.putImageData(image, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const og = out.getContext('2d');
+    og.imageSmoothingEnabled = false;
+    og.drawImage(staged, 0, 0);
+    return out;
+  }
+  const tileBlit = {};
+  function drawSheetTile(sheetName, tid, dx, dy) {
+    const key = sheetName + ':' + tid;
+    let c = tileBlit[key];
+    if (!c) {
+      const sheet = sheets[sheetName];
+      c = scaleNN(sheet, (tid % 16) * 8, ((tid / 16) | 0) * 8, 8, 8, PX);
+      tileBlit[key] = c;
+    }
+    crisp();
+    ctx.drawImage(c, dx, dy);
+  }
+  const scaled8 = new WeakMap();
+  function drawScaled8(src, dx, dy) {
+    let c = scaled8.get(src);
+    if (!c) {
+      c = scaleNN(src, 0, 0, 8, 8, PX);
+      scaled8.set(src, c);
+    }
+    crisp();
+    ctx.drawImage(c, dx, dy);
+  }
+  let walkFrame = [];
+  let walkFrameFlip = [];
+  function buildWalkFrames() {
+    walkFrame = [];
+    walkFrameFlip = [];
+    for (let f = 0; f < 6; f++) {
+      const scaled = scaleNN(playerCanvas, 0, f * 16, 16, 16, PX);
+      walkFrame.push(scaled);
+      walkFrameFlip.push(flipCanvas(scaled));
+    }
   }
 
   function drawBlock(sheetName, block, dx, dy) {
-    const sheet = sheets[sheetName];
-    ctx.imageSmoothingEnabled = false;
     const step = TILE / 4;
     for (let i = 0; i < 16; i++) {
-      const tid = block[i];
-      const sx = (tid % 16) * 8;
-      const sy = (tid / 16 | 0) * 8;
-      ctx.drawImage(sheet, sx, sy, 8, 8, dx + (i % 4) * step, dy + ((i / 4) | 0) * step, step, step);
+      drawSheetTile(sheetName, block[i], dx + (i % 4) * step, dy + ((i / 4) | 0) * step);
     }
   }
 
@@ -372,9 +487,11 @@
     }
     state.camX = camX;
     state.camY = camY;
-    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#081820';
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    crisp();
     const ox = -camX, oy = -camY;
     const x0 = Math.max(0, Math.floor(camX / TILE) - 1);
     const y0 = Math.max(0, Math.floor(camY / TILE) - 1);
@@ -398,24 +515,26 @@
       if (f.x < x0 - 1 || f.y < y0 - 1 || f.x > x1 + 1 || f.y > y1 + 1) continue;
       drawBlock('ow', BLOCKS.ow.flowers, Math.round(f.x * TILE + ox), Math.round(f.y * TILE + oy));
     }
-    const queue = [];
+    /* Trees, rocks, houses, and signs are background blocks, same as pret.
+       Red is a sprite, so he paints after them. Sorting a whole tree block
+       against his feet covered the half of him that overlaps the trunk. */
+    const propsDraw = [];
     for (let i = 0; i < props.length; i++) {
       const p = props[i];
       if (p.x < x0 - 1 || p.y < y0 - 1 || p.x > x1 + 1 || p.y > y1 + 1) continue;
-      queue.push({ y: p.y * TILE + TILE, draw: (function (pp) {
-        return function () { drawBlock(pp.sheet, pp.block, Math.round(pp.x * TILE + ox), Math.round(pp.y * TILE + oy)); };
-      })(p) });
+      propsDraw.push(p);
+    }
+    propsDraw.sort(function (a, b) { return (a.y - b.y) || (a.x - b.x); });
+    for (let i = 0; i < propsDraw.length; i++) {
+      const p = propsDraw[i];
+      drawBlock(p.sheet, p.block, Math.round(p.x * TILE + ox), Math.round(p.y * TILE + oy));
     }
     for (let i = 0; i < signs.length; i++) {
       const s = signs[i];
       if (s.x < x0 - 1 || s.y < y0 - 1 || s.x > x1 + 1 || s.y > y1 + 1) continue;
-      queue.push({ y: (s.y + 1) * TILE - PX, draw: (function (ss) {
-        return function () { drawSignPost(ss, ox, oy); };
-      })(s) });
+      drawSignPost(s, ox, oy);
     }
-    queue.push({ y: state.y, draw: drawPlayer });
-    queue.sort(function (a, b) { return a.y - b.y; });
-    for (let i = 0; i < queue.length; i++) queue[i].draw();
+    drawPlayer();
     drawPixelUI();
   }
 
@@ -432,18 +551,11 @@
     ctx.fillRect(fx - 2 * PX, fy - PX, 4 * PX, PX);
     ctx.fillRect(fx - 3 * PX, fy, 6 * PX, PX);
     ctx.fillRect(fx - 2 * PX, fy + PX, 4 * PX, PX);
-    ctx.imageSmoothingEnabled = false;
-    const flip = state.dir === 'right';
-    if (flip) {
-      ctx.save();
-      ctx.imageSmoothingEnabled = false;
-      ctx.translate(dx + dw, dy);
-      ctx.scale(-1, 1);
-      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, 0, 0, dw, dh);
-      ctx.restore();
-    } else {
-      ctx.drawImage(playerCanvas, 0, frame * 16, 16, 16, dx, dy, dw, dh);
-    }
+    const img = state.dir === 'right' ? walkFrameFlip[frame] : walkFrame[frame];
+    if (!img) return;
+    /* A negative scale here makes iOS repeat the side-view frame to the right. */
+    crisp();
+    ctx.drawImage(img, dx, dy, dw, dh);
   }
 
   function drawSignPost(s, ox, oy) {
@@ -451,11 +563,8 @@
     const tiles = [70, 71, 86, 87];
     const dx = Math.round(s.x * TILE + ox + (TILE - 2 * step) / 2);
     const dy = Math.round(s.y * TILE + oy + step);
-    const sheet = sheets.ow;
-    ctx.imageSmoothingEnabled = false;
     for (let i = 0; i < 4; i++) {
-      const tid = tiles[i];
-      ctx.drawImage(sheet, (tid % 16) * 8, ((tid / 16) | 0) * 8, 8, 8, dx + (i % 2) * step, dy + ((i / 2) | 0) * step, step, step);
+      drawSheetTile('ow', tiles[i], dx + (i % 2) * step, dy + ((i / 2) | 0) * step);
     }
   }
 
@@ -579,6 +688,7 @@
     stick.dir = null;
   }
   function onPointerMove(e) {
+    if (e.cancelable) e.preventDefault();
     const p = canvasPoint(e);
     if (state.mode === 'throw' && enc.drag) {
       noteSpin(p[0], p[1]);
@@ -639,20 +749,14 @@
 
   function drawWater(dx, dy) {
     const block = BLOCKS.ow.water;
-    const sheet = sheets.ow;
     const step = TILE / 4;
     const frame = waterFrames[waterFrame];
-    ctx.imageSmoothingEnabled = false;
     for (let i = 0; i < 16; i++) {
       const tid = block[i];
       const destX = dx + (i % 4) * step;
       const destY = dy + ((i / 4) | 0) * step;
-      if (tid === 20 && frame) ctx.drawImage(frame, 0, 0, 8, 8, destX, destY, step, step);
-      else {
-        const sx = (tid % 16) * 8;
-        const sy = (tid / 16 | 0) * 8;
-        ctx.drawImage(sheet, sx, sy, 8, 8, destX, destY, step, step);
-      }
+      if (tid === 20 && frame) drawScaled8(frame, destX, destY);
+      else drawSheetTile('ow', tid, destX, destY);
     }
   }
 
@@ -663,9 +767,8 @@
     const ne = isOcean(x + 1, y - 1), nw = isOcean(x - 1, y - 1);
     if (!n && !s && !e && !w && !se && !sw && !ne && !nw) return;
     const step = TILE / 4;
-    ctx.imageSmoothingEnabled = false;
     function stamp(tile, col, row) {
-      ctx.drawImage(tile, 0, 0, 8, 8, dx + col * step, dy + row * step, step, step);
+      drawScaled8(tile, dx + col * step, dy + row * step);
     }
     if (n) for (let i = 0; i < 4; i++) stamp(shore.n, i, 0);
     if (s) for (let i = 0; i < 4; i++) stamp(shore.s, i, 3);
@@ -1510,6 +1613,7 @@
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    clearSelection();
     if (bootError && !ready) {
       if (!state.viewW) resize();
       ctx.fillStyle = INK;
@@ -1538,13 +1642,33 @@
     holdCam();
   }
 
+  function blockBrowserGesture(e) {
+    if (e.cancelable) e.preventDefault();
+  }
+  function clearSelection() {
+    const sel = window.getSelection && window.getSelection();
+    if (sel && sel.rangeCount) sel.removeAllRanges();
+  }
   function wire() {
     canvas.addEventListener('pointerdown', onPointerDown, { passive: false });
     canvas.addEventListener('pointermove', onPointerMove, { passive: false });
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    /* touch-action and user-select are not enough on iOS: a long-press still
+       selects the canvas unless the touch sequence is cancelled. */
+    const guards = ['touchstart', 'touchmove', 'touchend', 'gesturestart', 'gesturechange', 'gestureend'];
+    for (let i = 0; i < guards.length; i++) {
+      document.addEventListener(guards[i], blockBrowserGesture, { passive: false, capture: true });
+    }
+    document.addEventListener('selectstart', blockBrowserGesture, true);
+    document.addEventListener('dragstart', blockBrowserGesture, true);
+    document.addEventListener('selectionchange', clearSelection);
     window.addEventListener('resize', resize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', resize);
+      window.visualViewport.addEventListener('scroll', resize);
+    }
   }
 
   // Four muted DMG shades. Every overworld pixel is one of these — no tint blend.
@@ -1743,6 +1867,7 @@
       // Interior sheets stay loaded with the Red set. Outdoor cells do not draw them.
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
       playerCanvas = paint(imgs[keys.length], RED_SPRITE);
+      buildWalkFrames();
       redPic = paint(imgs[keys.length + 1], RED_PIC);
       ballCanvas = paint(imgs[keys.length + 2], RED_SPRITE);
       buildShoreAndWater(sheets.ow);
