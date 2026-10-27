@@ -1,14 +1,14 @@
 /* Pokémon GO Island Demo — roster, biomes, and Gen-1 catch rates.
-   Sprites for the 14 non-Bulbasaur species are PokeAPI Gen-I Yellow
-   transparent fronts. Bulbasaur is the brother's art already in the repo. */
+   Wild fronts are PokeAPI Gen-I Red/Blue transparent sprites.
+   Bulbasaur is the brother's art already in the repo. */
 const ISLAND_DATA = {
-  // One cell is a 32×32 Red block drawn at 2× (64px). 15 cells at 192px/s is 5 seconds.
-  // The player sprite is the 16×16 Red walk cycle at that same 2× scale.
-  TILE: 64,
+  // 8×8 Red tiles at integer 4×. A 32×32 block is 128px. Red's 16×16 sprite is 64px (16→64).
+  // 15 blocks × 128px / 384px/s = 5 seconds.
+  TILE: 128,
   MAP: 37,
   CENTER: 18,
   COAST: 15,
-  SPEED: 192,
+  SPEED: 384,
 
   species: [
     { id: 'bulbasaur', name: 'BULBASAUR', type: 'GRASS',    catch: 45,  sprite: 'assets/sprites/bulbasaur.png' },

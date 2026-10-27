@@ -69,7 +69,12 @@ a.pbtn { display: flex; align-items: center; justify-content: center; text-decor
 /* ---------- Play ---------- */
 #play { position: relative; display: none; }
 #play.on { display: block; }
-#view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+#view {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  touch-action: none; cursor: crosshair;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
 
 .hud {
   position: absolute; top: 0; left: 0; right: 0; z-index: 3;

@@ -4,9 +4,9 @@ The live island demo **loads this folder** for the overworld, the player, and th
 
 These PNGs are Nintendo intellectual property, copied from [pret/pokered](https://github.com/pret/pokered) `gfx/` on `master`. Tiago explicitly approved committing them into this public fan-demo repository.
 
-The 2bpp sheets are grayscale. The page colors them at runtime (outdoor green for tiles, red / white / black for Red and the ball). Map cells are pret 32×32 blocks (4×4 tiles of 8×8), drawn at 2×. Red's overworld walk is the 16×16 frames in `sprites/red.png`.
+The 2bpp sheets are grayscale. The page colors the world with four muted Game Boy greens and draws it at integer 4× (nearest-neighbor, no blur). Map cells are pret 32×32 blocks. Red's 16×16 walk in `sprites/red.png` is shown at 64px. Red and the Poké Ball use red, white, and black.
 
-The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprites/bulbasaur.png`, `ivysaur.png`, `venusaur.png`). Do not replace that grass line with anything from this folder. Wild encounter fronts stay PokeAPI Generation I (Yellow in this demo) plus that Bulbasaur.
+The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprites/bulbasaur.png`, `ivysaur.png`, `venusaur.png`). Do not replace that grass line with anything from this folder. The other wild fronts are PokeAPI Generation I Red/Blue.
 
 ## What the demo draws
 
@@ -23,7 +23,7 @@ The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprit
 
 `tiles/pokecenter.png` and `tiles/reds_house.png` are loaded with the set. The island does not draw those interiors.
 
-Dark woods, volcanic rock, ice, and waterfall spray are canvas tints on the sheets above. Gen 1 has no ice tileset.
+Ice reuses the cavern floor and volcanic rock reuses the plateau. Gen 1 has no ice tileset, and the live world does not blend a second color on top of the four Game Boy shades.
 
 ## Tiles (`tiles/`)
 

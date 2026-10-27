@@ -1,7 +1,6 @@
 /* Pokémon GO Island — overworld, hold-to-pathfind, hold-to-throw catch.
-   Overworld, player, and Poké Ball render from island/assets/red/ (pret/pokered).
-   Each map cell is one 32×32 Red block (4×4 of 8×8 tiles) drawn at 2× = TILE px.
-   The player is the 16×16 overworld sprite at that same scale.
+   The world is pret/pokered, colored as four muted Game Boy shades and scaled
+   by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
    No battles, no D-pad. Center → coast is COAST cells at SPEED px/s = 5s. */
 (function () {
   const D = ISLAND_DATA;
@@ -64,13 +63,6 @@
     path: ['ow', BLOCKS.ow.path],
     waterfall: ['ow', BLOCKS.ow.water],
   };
-  const TINT = {
-    dark: '#24382c',
-    volcanic: '#e07038',
-    ice: '#d4eaff',
-    waterfall: '#d2f4ff',
-  };
-
   /* 16×16 overworld sprite rows in sprites/red.png: stand down/up/left, then walk. */
   const POSE = { down: [0, 3], up: [1, 4], left: [2, 5], right: [2, 5] };
   const SPRITE = TILE / 2;
@@ -325,7 +317,8 @@
   }
 
   function resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // Fractional device pixels smear a 4× Game Boy grid. Stay on 1× or 2×.
+    const dpr = (window.devicePixelRatio || 1) >= 1.5 ? 2 : 1;
     const w = window.innerWidth, h = window.innerHeight;
     canvas.width = Math.max(1, Math.floor(w * dpr));
     canvas.height = Math.max(1, Math.floor(h * dpr));
@@ -339,6 +332,7 @@
 
   function drawBlock(sheetName, block, dx, dy) {
     const sheet = sheets[sheetName];
+    ctx.imageSmoothingEnabled = false;
     const step = TILE / 4;
     for (let i = 0; i < 16; i++) {
       const tid = block[i];
@@ -357,10 +351,12 @@
     else camX = (world - w) / 2;
     if (world > h) camY = Math.max(0, Math.min(world - h, camY));
     else camY = (world - h) / 2;
+    camX = Math.round(camX);
+    camY = Math.round(camY);
     state.camX = camX;
     state.camY = camY;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#14304c';
+    ctx.fillStyle = '#081820';
     ctx.fillRect(0, 0, w, h);
     const ox = -camX, oy = -camY;
     const x0 = Math.max(0, Math.floor(camX / TILE) - 1);
@@ -374,16 +370,6 @@
         const b = biome[y][x];
         const spec = FLOOR[b] || FLOOR.meadow;
         drawBlock(spec[0], spec[1], dx, dy);
-        if (TINT[b]) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(dx, dy, TILE, TILE);
-          ctx.clip();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = TINT[b];
-          ctx.fillRect(dx, dy, TILE, TILE);
-          ctx.restore();
-        }
       }
     }
     for (let i = 0; i < flowers.length; i++) {
@@ -407,7 +393,7 @@
   function drawPlayer() {
     const pose = POSE[state.dir] || POSE.down;
     const moving = state.path.length > 0 && state.mode === 'explore';
-    const frame = pose[moving ? (Math.floor(state.moved / 16) % 2) : 0];
+    const frame = pose[moving ? (Math.floor(state.moved / 32) % 2) : 0];
     const dw = SPRITE, dh = SPRITE;
     const dx = state.x - state.camX - dw / 2;
     const dy = state.y - state.camY - dh + 4;
@@ -830,6 +816,7 @@
     });
   }
 
+  // Four muted DMG shades. Every overworld pixel is one of these — no tint blend.
   const GB = [[224, 248, 208], [136, 192, 112], [52, 104, 86], [8, 24, 32]];
   const RED_SPRITE = [null, [248, 248, 248], [224, 48, 48], [16, 16, 16]];
   const RED_PIC = [[248, 248, 248], [240, 208, 176], [224, 48, 48], [16, 16, 16]];

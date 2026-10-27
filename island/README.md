@@ -19,7 +19,7 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 ## Controls
 
 - **Hold the ground** (or press and drag) on walkable land. Red pathfinds there and keeps walking if you let go. Drag while held to change the destination. Water, trees, rocks, and walls are blocked. There is no D-pad.
-- The camera follows the player. From the town center to the coast, straight ahead, is **15 cells**. Each cell is a 32×32 Red block drawn at 2× (64px), and Red's 16×16 sprite uses that same scale. Walk speed is **192 px/s**, so that walk is **5 seconds**.
+- The camera follows the player. From the town center to the coast, straight ahead, is **15 blocks**. Each block is 32×32 Red pixels drawn at integer **4×** (128px on screen). Red's 16×16 sprite is **64px** (16→64), nearest-neighbor, no blur. Walk speed is **384 px/s**, so that walk is **5 seconds**.
 - Stepping through tall grass, forest, shore, and the other encounter biomes can start a wild encounter. It is not every step: a short warmup, then a per-tile roll, then a few seconds of quiet after each encounter.
 - **Hold the Poké Ball**, watch the arc and the meter, then **release** to throw. A very short hold misses. A fuller hold is more likely to catch.
 - Three failed throws can make the Pokémon flee; the fourth always does. **Back away** leaves without throwing.
@@ -28,7 +28,7 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 
 ## Biome → type
 
-One Gen 1 species per type. Bulbasaur uses the brother's sprite already in `assets/sprites/`. The other fronts are PokeAPI Generation I Yellow transparent sprites, cropped to the Pokémon.
+One Gen 1 species per type. Bulbasaur uses the brother's sprite already in `assets/sprites/`. The other fronts are PokeAPI Generation I Red/Blue transparent sprites, cropped to the Pokémon.
 
 | Biome | Where | Who shows up |
 | --- | --- | --- |
@@ -58,15 +58,17 @@ The live demo loads this folder for the overworld. See `assets/red/README.md`.
 | --- | --- |
 | Meadow, tall grass, path, town, water, waterfall | `tiles/overworld.png` |
 | Shore | `tiles/ship_port.png` (dock) |
-| Forest and dark forest | `tiles/forest.png` (dark woods use a tint) |
-| Mountain, dojo yard, ruins, volcanic rock | `tiles/plateau.png` (volcanic uses a tint) |
-| Dirt and ice | `tiles/cavern.png` (ice uses a tint; Gen 1 has no ice tileset) |
+| Forest and dark forest | `tiles/forest.png` |
+| Mountain, dojo yard, ruins, volcanic rock | `tiles/plateau.png` |
+| Dirt and ice | `tiles/cavern.png` (Gen 1 has no ice tileset) |
 | Trees, rocks, bushes, houses | Tile blocks inside overworld, forest, and plateau |
 | Player walk | `sprites/red.png` (16×16 down / up / left, walk frames; right is flipped) |
 | Title portrait | `player/red.png` (56×56 Red pic) |
 | Poké Ball | `sprites/poke_ball.png` |
 
-`tiles/pokecenter.png` and `tiles/reds_house.png` load with the Red set. Indoor rooms are not drawn on the island. Bulbasaur stays the brother's sprite. The other encounter fronts stay PokeAPI Generation I Yellow.
+`tiles/pokecenter.png` and `tiles/reds_house.png` load with the Red set. Indoor rooms are not drawn on the island. Bulbasaur stays the brother's sprite. The other encounter fronts are PokeAPI Generation I Red/Blue.
+
+The overworld uses only the four muted Game Boy greens (`#e0f8d0`, `#88c070`, `#346856`, `#081820`). Pixels stay on that grid: integer 4× scale, nearest-neighbor, no color multiply.
 
 > Unofficial fan project. Pokémon Red graphics are Nintendo / Game Freak / The Pokémon Company intellectual property. Not affiliated with them.
 
@@ -78,9 +80,7 @@ The live demo loads this folder for the overworld. See `assets/red/README.md`.
 | Footsteps, book, click | [Kenney 50 RPG sound effects](https://opengameart.org/content/50-rpg-sound-effects) in `assets/sfx/` | CC0 |
 | Throw / catch / flee stingers | Original Web Audio in `js/audio.js` | Same terms as this project. No ROM audio |
 | Bulbasaur | Brother's art, `assets/sprites/bulbasaur.png` (copy of the repo sprite; the original file is unchanged) | Used with permission for this fan demo |
-| Other front sprites | [PokeAPI](https://pokeapi.co) Generation I Yellow transparent sprites | Pokémon artwork is property of Nintendo / Game Freak / The Pokémon Company. Fan demo only |
+| Other front sprites | [PokeAPI](https://pokeapi.co) Generation I Red/Blue transparent sprites | Pokémon artwork is property of Nintendo / Game Freak / The Pokémon Company. Fan demo only |
 | Press Start 2P | Repo font, SIL Open Font License (`../../assets/fonts/OFL.txt`) | OFL |
 
-Kenney tiles and the Tnypixels walk sheet remain in the repo. The live overworld does not draw them.
-
-Biome tints (dark woods, volcanic rock, ice, waterfall spray) are drawn over the Red floors in the canvas. They are not a second tileset.
+Kenney tiles and the Tnypixels walk sheet remain in the repo. The live overworld does not draw them. The world is the four Game Boy shades at 4×, so it reads as Pokémon Red rather than a modern tileset.
