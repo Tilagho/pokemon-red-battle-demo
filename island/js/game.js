@@ -753,16 +753,46 @@
   }
 
   const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
+  let legalTick = 0;
 
   function drawFooter() {
-    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
-    const h = (lines.length * 8 + 2) * PX;
+    // Title keeps the full sentence wrapped. During play it is one grid-aligned
+    // line so the coastline stays on screen; the same sentence scrolls past.
+    if (state.mode === 'title') {
+      const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
+      const h = (lines.length * 8 + 2) * PX;
+      const y = snap(state.viewH - h);
+      ctx.fillStyle = INK;
+      ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
+      for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
+      return y;
+    }
+    legalTick++;
+    const h = 10 * PX;
     const y = snap(state.viewH - h);
     ctx.fillStyle = INK;
-    ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
+    ctx.fillRect(0, y, snap(state.viewW), h);
     ctx.fillStyle = PAPER;
-    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
-    for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
+    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), h - 2 * PX);
+    const text = LEGAL + '    ';
+    const span = text.length * ADV * PX;
+    const shift = (Math.floor(legalTick / 4) * PX) % span;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(2 * PX, y + PX, Math.max(PX, snap(state.viewW) - 4 * PX), 8 * PX);
+    ctx.clip();
+    const start = 2 * PX - shift;
+    for (let copy = 0; copy < 2; copy++) {
+      for (let i = 0; i < text.length; i++) {
+        const gx = start + (copy * text.length + i) * ADV * PX;
+        if (gx > state.viewW) break;
+        if (gx + 8 * PX < 0) continue;
+        drawText(text.charAt(i), gx, y + PX, INK);
+      }
+    }
+    ctx.restore();
     return y;
   }
 
