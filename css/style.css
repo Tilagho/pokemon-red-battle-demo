@@ -83,6 +83,12 @@ img { -webkit-user-drag: none; }
 .title-sprites { display: flex; gap: 2px; justify-content: center; }
 .title-sprites .sprite { width: 96px; height: 96px; }
 .fine { font-size: 8px; line-height: 1.7; text-align: center; opacity: .7; margin: 0; }
+.island-link {
+  font-size: 10px; line-height: 1.4; color: var(--ink); text-decoration: none; text-align: center;
+  border: 3px solid var(--ink); border-radius: 4px; background: #f8d030;
+  box-shadow: 0 3px 0 var(--ink); padding: 10px 12px; min-height: 44px;
+}
+.island-link:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
 .bob { animation: bob 1s steps(2) infinite; }
 .bob.d1 { animation-delay: .33s; } .bob.d2 { animation-delay: .66s; }
 @keyframes bob { 50% { transform: translateY(-4px); } }
