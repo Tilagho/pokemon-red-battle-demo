@@ -21,7 +21,7 @@ The brother's Bulbasaur, Ivysaur, and Venusaur art stays separate (`assets/sprit
 | Title portrait | `player/red.png` |
 | Poké Ball | `sprites/poke_ball.png` |
 
-`tiles/pokecenter.png` and `tiles/reds_house.png` are loaded with the set. The island does not draw those interiors.
+`tiles/pokecenter.png` and `tiles/reds_house.png` are loaded with the set. The island does not draw those interiors. House, mart, center, and dojo exteriors are overworld blocks from Pallet Town and Viridian City.
 
 Ice reuses the cavern floor and volcanic rock reuses the plateau. Gen 1 has no ice tileset, and the live world does not blend a second color on top of the four Game Boy shades.
 
