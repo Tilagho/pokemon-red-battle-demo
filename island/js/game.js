@@ -1,7 +1,7 @@
-/* Pokémon GO Island — overworld, hold-to-pathfind, GO-style flick catch.
+/* Pokémon GO Island — overworld, invisible joystick, GO-style flick catch.
    The world is pret/pokered, colored as four muted Game Boy shades and scaled
    by an integer 4× (8×8 tiles → 32px, 16×16 Red → 64px). Nearest-neighbor only.
-   Encounter chip, buttons, and the throw are drawn on this same pixel grid.
+   Encounter chip, signs, buttons, and the throw are drawn on this same pixel grid.
    No battles, no D-pad. Center → coast is COAST cells at SPEED px/s = 5s. */
 (function () {
   const D = ISLAND_DATA;
@@ -18,10 +18,6 @@
       path: [35,35,35,35,57,35,35,35,35,35,35,35,35,35,57,35],
       tall: [82,82,82,82,82,82,82,82,82,82,82,82,82,82,82,82],
       grass: [57,57,57,57,57,57,57,57,57,57,57,57,57,57,57,57],
-      roofL: [35,35,35,35,57,35,35,35,5,6,7,7,21,22,23,23],
-      roofR: [35,35,35,35,57,35,35,35,7,7,8,9,23,23,24,25],
-      wallL: [37,38,10,34,92,23,23,23,15,34,11,12,78,26,27,28],
-      wallR: [10,10,40,41,23,23,23,93,10,10,34,31,26,26,26,79],
       treeL: [42,43,44,44,58,59,44,44,42,43,44,44,58,59,44,44],
       trees: [44,44,44,44,44,44,44,44,42,43,42,43,58,59,58,59],
       water: [20,20,20,84,20,20,20,84,20,20,20,84,20,20,20,84],
@@ -64,6 +60,25 @@
     path: ['ow', BLOCKS.ow.path],
     waterfall: ['ow', BLOCKS.ow.water],
   };
+  /* pret/pokered gfx/blocksets/overworld.bst. These are the Pallet / Viridian
+     exteriors: house 56+57 / 60+61, gym 12–14 / 16–18, mart & center 32+33. */
+  const OW = {
+    12: [5, 6, 83, 83, 21, 56, 18, 18, 21, 56, 18, 18, 21, 22, 23, 23],
+    13: [83, 83, 83, 83, 18, 18, 18, 18, 18, 18, 18, 18, 23, 23, 23, 23],
+    14: [83, 83, 8, 9, 18, 18, 56, 25, 18, 18, 56, 25, 23, 23, 24, 25],
+    16: [37, 38, 10, 10, 15, 34, 34, 34, 15, 10, 10, 10, 78, 26, 26, 26],
+    17: [34, 47, 63, 34, 34, 34, 34, 34, 10, 10, 10, 10, 26, 26, 26, 26],
+    18: [10, 10, 40, 41, 34, 34, 34, 31, 11, 12, 10, 31, 27, 28, 26, 79],
+    32: [76, 83, 83, 83, 90, 18, 18, 18, 90, 18, 18, 18, 92, 23, 23, 23],
+    33: [83, 83, 83, 77, 18, 18, 18, 90, 18, 18, 18, 90, 23, 23, 23, 93],
+    56: [35, 35, 35, 35, 57, 35, 35, 35, 5, 6, 7, 7, 21, 22, 23, 23],
+    57: [35, 35, 35, 35, 57, 35, 35, 35, 7, 7, 8, 9, 23, 23, 24, 25],
+    60: [37, 38, 10, 34, 92, 23, 23, 23, 15, 34, 11, 12, 78, 26, 27, 28],
+    61: [10, 10, 40, 41, 23, 23, 23, 93, 10, 10, 34, 31, 26, 26, 26, 79],
+    114: [10, 10, 10, 31, 75, 75, 75, 31, 66, 67, 75, 31, 74, 74, 26, 79],
+    115: [10, 10, 10, 31, 75, 75, 75, 31, 68, 69, 75, 31, 74, 74, 26, 79],
+    124: [15, 10, 10, 10, 15, 75, 75, 75, 15, 75, 11, 12, 78, 26, 27, 28],
+  };
   /* 16×16 overworld sprite rows in sprites/red.png: stand down/up/left, then walk. */
   const POSE = { down: [0, 3], up: [1, 4], left: [2, 5], right: [2, 5] };
   const SPRITE = TILE / 2;
@@ -100,16 +115,19 @@
   const biome = [];
   const props = [];
   const flowers = [];
+  const signs = [];
   const blocked = new Uint8Array(MAP * MAP);
+  const stick = { on: false, ox: 0, oy: 0, x: 0, y: 0, dir: null };
+  let bumpT = 0;
 
   const state = {
     mode: 'title',
     x: (CENTER + 0.5) * TILE,
     y: (CENTER + 0.5) * TILE,
     dir: 'down',
-    path: [],
-    hold: false,
-    goal: null,
+    camHold: false,
+    camLock: null,
+    sign: null,
     moved: 0,
     tileX: CENTER,
     tileY: CENTER,
@@ -197,6 +215,23 @@
     props.push({ x: x, y: y, sheet: sheet, block: block });
   }
 
+  function stamp(x, y, rows) {
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) placeSolid(x + c, y + r, 'ow', OW[rows[r][c]]);
+    }
+  }
+
+  function placeSign(x, y, lines) {
+    if (!inMap(x, y)) return;
+    if (biome[y][x] === 'water' || biome[y][x] === 'path') return;
+    blocked[idx(x, y)] = 1;
+    signs.push({ x: x, y: y, lines: lines });
+  }
+
+  function townLot(x, y) {
+    return x >= 10 && x <= 22 && y >= 10 && y <= 17;
+  }
+
   function buildMap() {
     for (let y = 0; y < MAP; y++) {
       biome[y] = [];
@@ -208,20 +243,19 @@
         biome[y][x] = b;
       }
     }
-    // House west of the crossroad, door facing the plaza.
-    placeSolid(15, 15, 'ow', BLOCKS.ow.roofL);
-    placeSolid(16, 15, 'ow', BLOCKS.ow.roofR);
-    placeSolid(15, 16, 'ow', BLOCKS.ow.wallL);
-    // Dojo: roof along the back, open front toward the road.
-    placeSolid(11, 15, 'ow', BLOCKS.ow.roofL);
-    placeSolid(12, 15, 'ow', BLOCKS.ow.roofR);
-    placeSolid(13, 15, 'ow', BLOCKS.ow.roofL);
-    placeSolid(11, 16, 'ow', BLOCKS.ow.wallL);
-    placeSolid(13, 16, 'ow', BLOCKS.ow.wallR);
+    // Pallet house, Viridian gym, Pokémon Center, and Mart. Each door faces south.
+    stamp(15, 14, [[56, 57], [60, 61]]);
+    placeSign(15, 16, ["RED'S HOUSE", 'A QUIET HOUSE', 'ON THIS ISLAND.']);
+    stamp(11, 14, [[12, 13, 14], [16, 17, 18]]);
+    placeSign(11, 16, ['FIGHTING DOJO', 'TRAINERS MEET', 'AND PRACTICE.']);
+    stamp(19, 14, [[32, 33], [124, 114]]);
+    placeSign(19, 16, ['POKEMON', 'CENTER', 'A PLACE TO REST.']);
+    stamp(19, 11, [[32, 33], [124, 115]]);
+    placeSign(21, 12, ['POKEMON', 'MART', 'GOODS FOR THE ROAD.']);
 
     for (let y = 0; y < MAP; y++) {
       for (let x = 0; x < MAP; x++) {
-        if (blocked[idx(x, y)]) continue;
+        if (blocked[idx(x, y)] || townLot(x, y)) continue;
         const b = biome[y][x];
         if (b === 'path' || b === 'water' || b === 'shore' || b === 'town' || b === 'waterfall') continue;
         const r = rnd(x, y);
@@ -242,6 +276,10 @@
     console.assert(walkable(CENTER, CENTER + D.COAST), 'coast tile should be walkable');
     console.assert(!walkable(CENTER, CENTER + D.COAST + 1), 'past the coast is water');
     console.assert(biome[19][CENTER] === 'tall', 'south grass patch');
+    console.assert(!walkable(15, 15), 'house wall');
+    console.assert(!walkable(16, 15), 'house window');
+    console.assert(walkable(15, 17), 'approach the house');
+    console.assert(signs.length === 4, 'every building has a sign');
   }
 
   function walkable(x, y) {
@@ -251,65 +289,29 @@
     return true;
   }
 
-  function astar(sx, sy, gx, gy) {
-    if (!walkable(gx, gy)) return null;
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-    const gScore = new Float64Array(MAP * MAP);
-    gScore.fill(Infinity);
-    const prev = new Int32Array(MAP * MAP);
-    prev.fill(-1);
-    const open = [sy * MAP + sx];
-    gScore[idx(sx, sy)] = 0;
-    const inOpen = new Uint8Array(MAP * MAP);
-    inOpen[idx(sx, sy)] = 1;
-    function heur(i) {
-      const x = i % MAP, y = (i / MAP) | 0;
-      return Math.hypot(x - gx, y - gy);
-    }
-    while (open.length) {
-      let best = 0;
-      for (let i = 1; i < open.length; i++) {
-        if (gScore[open[i]] + heur(open[i]) < gScore[open[best]] + heur(open[best])) best = i;
-      }
-      const cur = open.splice(best, 1)[0];
-      inOpen[cur] = 0;
-      const x = cur % MAP, y = (cur / MAP) | 0;
-      if (x === gx && y === gy) {
-        const path = [];
-        let c = cur;
-        while (c !== idx(sx, sy) && c >= 0) {
-          path.push([c % MAP, (c / MAP) | 0]);
-          c = prev[c];
-        }
-        path.reverse();
-        return path;
-      }
-      for (let d = 0; d < dirs.length; d++) {
-        const nx = x + dirs[d][0], ny = y + dirs[d][1];
-        if (!walkable(nx, ny)) continue;
-        if (dirs[d][0] && dirs[d][1] && (!walkable(x + dirs[d][0], y) || !walkable(x, y + dirs[d][1]))) continue;
-        const cost = gScore[cur] + (dirs[d][0] && dirs[d][1] ? 1.41421356 : 1);
-        const ni = idx(nx, ny);
-        if (cost < gScore[ni]) {
-          gScore[ni] = cost;
-          prev[ni] = cur;
-          if (!inOpen[ni]) { open.push(ni); inOpen[ni] = 1; }
-        }
-      }
-    }
-    return null;
+  const DEAD = 24;
+  const FACE = ['right', 'down', 'down', 'down', 'left', 'up', 'up', 'up'];
+
+  function stickVector() {
+    const dx = stick.x - stick.ox;
+    const dy = stick.y - stick.oy;
+    if (dx * dx + dy * dy < DEAD * DEAD) return null;
+    const oct = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+    const a = oct * (Math.PI / 4);
+    return { x: Math.cos(a), y: Math.sin(a), oct: oct };
   }
 
-  function setGoal(tx, ty) {
-    if (!walkable(tx, ty)) return;
-    if (state.goal && state.goal[0] === tx && state.goal[1] === ty && state.path.length) return;
-    const sx = Math.floor(state.x / TILE), sy = Math.floor(state.y / TILE);
-    if (sx === tx && sy === ty) { state.path = []; state.goal = [tx, ty]; return; }
-    const tiles = astar(sx, sy, tx, ty);
-    state.goal = [tx, ty];
-    if (!tiles) { state.path = []; return; }
-    state.path = tiles.map(function (t) { return [(t[0] + 0.5) * TILE, (t[1] + 0.5) * TILE]; });
+  function nudge(dx, dy) {
+    if (!dx && !dy) return false;
+    const nx = state.x + dx;
+    const ny = state.y + dy;
+    if (!walkable(Math.floor(nx / TILE), Math.floor(ny / TILE))) return false;
+    state.x = nx;
+    state.y = ny;
+    return true;
   }
+
+  function holdCam() { state.camHold = true; }
 
   function loadImage(src) {
     return new Promise(function (res, rej) {
@@ -355,9 +357,19 @@
     else camX = (world - w) / 2;
     if (world > h) camY = Math.max(0, Math.min(world - h, camY));
     else camY = (world - h) / 2;
-    // Encounter chip is a screen overlay. It must not slide or re-center Red.
     camX = snap(camX);
     camY = snap(camY);
+    const lock = state.camLock;
+    if (lock && lock.x === state.x && lock.y === state.y && lock.viewW === w && lock.viewH === h) {
+      camX = lock.camX;
+      camY = lock.camY;
+    } else {
+      state.camLock = null;
+    }
+    if (state.camHold) {
+      state.camLock = { x: state.x, y: state.y, camX: camX, camY: camY, viewW: w, viewH: h };
+      state.camHold = false;
+    }
     state.camX = camX;
     state.camY = camY;
     ctx.imageSmoothingEnabled = false;
@@ -394,6 +406,13 @@
         return function () { drawBlock(pp.sheet, pp.block, Math.round(pp.x * TILE + ox), Math.round(pp.y * TILE + oy)); };
       })(p) });
     }
+    for (let i = 0; i < signs.length; i++) {
+      const s = signs[i];
+      if (s.x < x0 - 1 || s.y < y0 - 1 || s.x > x1 + 1 || s.y > y1 + 1) continue;
+      queue.push({ y: (s.y + 1) * TILE - PX, draw: (function (ss) {
+        return function () { drawSignPost(ss, ox, oy); };
+      })(s) });
+    }
     queue.push({ y: state.y, draw: drawPlayer });
     queue.sort(function (a, b) { return a.y - b.y; });
     for (let i = 0; i < queue.length; i++) queue[i].draw();
@@ -402,7 +421,7 @@
 
   function drawPlayer() {
     const pose = POSE[state.dir] || POSE.down;
-    const moving = state.path.length > 0 && state.mode === 'explore';
+    const moving = !!stick.dir && state.mode === 'explore';
     const frame = pose[moving ? (Math.floor(state.moved / 32) % 2) : 0];
     const dw = SPRITE, dh = SPRITE;
     const dx = snap(state.x - state.camX - dw / 2);
@@ -427,30 +446,38 @@
     }
   }
 
+  function drawSignPost(s, ox, oy) {
+    const step = TILE / 4;
+    const tiles = [70, 71, 86, 87];
+    const dx = Math.round(s.x * TILE + ox + (TILE - 2 * step) / 2);
+    const dy = Math.round(s.y * TILE + oy + step);
+    const sheet = sheets.ow;
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < 4; i++) {
+      const tid = tiles[i];
+      ctx.drawImage(sheet, (tid % 16) * 8, ((tid / 16) | 0) * 8, 8, 8, dx + (i % 2) * step, dy + ((i / 2) | 0) * step, step, step);
+    }
+  }
+
   let lastTileStep = CENTER + CENTER * MAP;
   function update(dt) {
     if (state.mode !== 'explore') return;
     state.cooldown = Math.max(0, state.cooldown - dt);
-    if (!state.path.length) return;
-    let left = SPEED * dt;
-    while (left > 0 && state.path.length) {
-      const target = state.path[0];
-      const dx = target[0] - state.x, dy = target[1] - state.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist <= left || dist < 1.5) {
-        if (Math.abs(dx) > Math.abs(dy)) state.dir = dx >= 0 ? 'right' : 'left';
-        else if (dy !== 0) state.dir = dy > 0 ? 'down' : 'up';
-        state.moved += dist;
-        state.x = target[0];
-        state.y = target[1];
-        left -= dist;
-        state.path.shift();
-      } else {
-        state.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
-        state.x += dx / dist * left;
-        state.y += dy / dist * left;
-        state.moved += left;
-        left = 0;
+    bumpT = Math.max(0, bumpT - dt);
+    stick.dir = null;
+    if (stick.on) {
+      const v = stickVector();
+      if (v) {
+        stick.dir = v;
+        state.dir = FACE[v.oct];
+        const stepX = v.x * SPEED * dt;
+        const stepY = v.y * SPEED * dt;
+        const movedX = nudge(stepX, 0);
+        const movedY = nudge(0, stepY);
+        if ((stepX && !movedX) || (stepY && !movedY)) {
+          if (bumpT <= 0) { bumpT = 0.32; IslandAudio.bump(); }
+        }
+        if (movedX || movedY) state.moved += Math.hypot(movedX ? stepX : 0, movedY ? stepY : 0);
       }
     }
     const tx = Math.floor(state.x / TILE), ty = Math.floor(state.y / TILE);
@@ -473,13 +500,6 @@
     }
   }
 
-  function screenToTile(clientX, clientY) {
-    const r = canvas.getBoundingClientRect();
-    const wx = (clientX - r.left) + state.camX;
-    const wy = (clientY - r.top) + state.camY;
-    return [Math.floor(wx / TILE), Math.floor(wy / TILE)];
-  }
-
   function canvasPoint(e) {
     const r = canvas.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
@@ -492,6 +512,45 @@
     }
     return null;
   }
+  function signInFront() {
+    const tx = Math.floor(state.x / TILE);
+    const ty = Math.floor(state.y / TILE);
+    const step = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[state.dir] || [0, 1];
+    for (let i = 0; i < signs.length; i++) {
+      const s = signs[i];
+      if (s.x === tx + step[0] && s.y === ty + step[1]) return s;
+    }
+    return null;
+  }
+  function signUnderPoint(px, py) {
+    const step = TILE / 4;
+    for (let i = signs.length - 1; i >= 0; i--) {
+      const s = signs[i];
+      const sx = s.x * TILE - state.camX + (TILE - 2 * step) / 2;
+      const sy = s.y * TILE - state.camY + step;
+      if (px < sx - 8 * PX || py < sy - 8 * PX || px >= sx + 2 * step + 8 * PX || py >= sy + 2 * step + 8 * PX) continue;
+      const dist = Math.max(Math.abs(state.x / TILE - (s.x + 0.5)), Math.abs(state.y / TILE - (s.y + 0.5)));
+      if (dist <= 1.8) return s;
+    }
+    return null;
+  }
+  function openSign(s) {
+    if (!s || state.mode !== 'explore') return;
+    stick.on = false;
+    stick.dir = null;
+    holdCam();
+    state.sign = s;
+    state.mode = 'sign';
+    IslandAudio.click();
+  }
+  function closeSign() {
+    if (state.mode !== 'sign') return;
+    holdCam();
+    state.mode = 'explore';
+    state.sign = null;
+    IslandAudio.click();
+  }
+
   function onPointerDown(e) {
     if (e.button != null && e.button !== 0) return;
     e.preventDefault();
@@ -499,7 +558,7 @@
     if (!ready) return;
     const p = canvasPoint(e);
     const id = hitAt(p[0], p[1]);
-    if (state.mode === 'title' || state.mode === 'dex') {
+    if (state.mode === 'title' || state.mode === 'dex' || state.mode === 'sign') {
       ui.press = id;
       return;
     }
@@ -512,9 +571,12 @@
       return;
     }
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already captured */ }
-    state.hold = true;
-    const t = screenToTile(e.clientX, e.clientY);
-    setGoal(t[0], t[1]);
+    stick.on = true;
+    stick.ox = p[0];
+    stick.oy = p[1];
+    stick.x = p[0];
+    stick.y = p[1];
+    stick.dir = null;
   }
   function onPointerMove(e) {
     const p = canvasPoint(e);
@@ -526,9 +588,9 @@
       enc.by = p[1] - BALL / 2;
       return;
     }
-    if (!state.hold || state.mode !== 'explore') return;
-    const t = screenToTile(e.clientX, e.clientY);
-    setGoal(t[0], t[1]);
+    if (!stick.on || state.mode !== 'explore') return;
+    stick.x = p[0];
+    stick.y = p[1];
   }
   function onPointerUp(e) {
     const p = e ? canvasPoint(e) : null;
@@ -536,9 +598,19 @@
     if (ui.press && p) {
       const id = hitAt(p[0], p[1]);
       if (id === ui.press) activate(id);
+      else if (state.mode === 'sign') closeSign();
+    } else if (state.mode === 'sign') {
+      closeSign();
+    } else if (stick.on && p && state.mode === 'explore') {
+      const moved = Math.hypot(p[0] - stick.ox, p[1] - stick.oy);
+      if (moved < DEAD) {
+        const near = signUnderPoint(p[0], p[1]) || signInFront();
+        if (near) openSign(near);
+      }
     }
     ui.press = null;
-    state.hold = false;
+    stick.on = false;
+    stick.dir = null;
   }
 
   function pickSpecies(biomeName) {
@@ -751,69 +823,80 @@
     return { x: x, y: y, w: w, h: h };
   }
 
-  const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
-  let legalTick = 0;
+  /* pret/pokered gfx/font/font_extra.png tiles $79–$7e. One tile is 8 GB px. */
+  const BOX = {
+    tl: [0, 24, 45, 126, 66, 37, 26, 20],
+    t: [0, 0, 255, 0, 255, 255, 0, 0],
+    tr: [0, 24, 172, 126, 66, 164, 88, 40],
+    v: [40, 40, 40, 40, 40, 40, 40, 40],
+    bl: [20, 26, 45, 126, 66, 37, 24, 0],
+    br: [40, 88, 172, 126, 66, 164, 24, 0],
+  };
+  const TW = 8 * PX;
 
-  function drawFooter() {
-    // Title keeps the full sentence wrapped. During play it is one grid-aligned
-    // line so the coastline stays on screen; the same sentence scrolls past.
-    if (state.mode === 'title') {
-      const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
-      const h = (lines.length * 8 + 2) * PX;
-      const y = snap(state.viewH - h);
-      ctx.fillStyle = INK;
-      ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
-      ctx.fillStyle = PAPER;
-      ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
-      for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
-      return y;
-    }
-    legalTick++;
-    const h = 10 * PX;
-    const y = snap(state.viewH - h);
+  function drawBoxTile(bits, x, y) {
     ctx.fillStyle = INK;
-    ctx.fillRect(0, y, snap(state.viewW), h);
-    ctx.fillStyle = PAPER;
-    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), h - 2 * PX);
-    const text = LEGAL + '    ';
-    const span = text.length * ADV * PX;
-    const shift = (Math.floor(legalTick / 4) * PX) % span;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(2 * PX, y + PX, Math.max(PX, snap(state.viewW) - 4 * PX), 8 * PX);
-    ctx.clip();
-    const start = 2 * PX - shift;
-    for (let copy = 0; copy < 2; copy++) {
-      for (let i = 0; i < text.length; i++) {
-        const gx = start + (copy * text.length + i) * ADV * PX;
-        if (gx > state.viewW) break;
-        if (gx + 8 * PX < 0) continue;
-        drawText(text.charAt(i), gx, y + PX, INK);
+    for (let row = 0; row < 8; row++) {
+      const b = bits[row];
+      for (let col = 0; col < 8; col++) {
+        if (b & (128 >> col)) ctx.fillRect(x + col * PX, y + row * PX, PX, PX);
       }
     }
-    ctx.restore();
+  }
+
+  function drawRedBox(x, y, w, h) {
+    w = Math.max(TW * 3, Math.ceil(w / TW) * TW);
+    h = Math.max(TW * 3, Math.ceil(h / TW) * TW);
+    x = snap(x);
+    y = snap(y);
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(x, y, w, h);
+    const cols = w / TW;
+    const rows = h / TW;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let bits = null;
+        if (r === 0 && c === 0) bits = BOX.tl;
+        else if (r === 0 && c === cols - 1) bits = BOX.tr;
+        else if (r === rows - 1 && c === 0) bits = BOX.bl;
+        else if (r === rows - 1 && c === cols - 1) bits = BOX.br;
+        else if (r === 0 || r === rows - 1) bits = BOX.t;
+        else if (c === 0 || c === cols - 1) bits = BOX.v;
+        if (bits) drawBoxTile(bits, x + c * TW, y + r * TW);
+      }
+    }
+    return { x: x, y: y, w: w, h: h, ix: x + TW, iy: y + TW, iw: w - 2 * TW, ih: h - 2 * TW };
+  }
+
+  const LEGAL = 'UNOFFICIAL FAN PROJECT. NOT AFFILIATED WITH NINTENDO, GAME FREAK, OR THE POKEMON COMPANY.';
+
+  function drawFooter() {
+    const lines = wrapLines(LEGAL, Math.max(8 * PX, state.viewW - 4 * PX));
+    const h = (lines.length * 8 + 2) * PX;
+    const y = snap(state.viewH - h);
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, y, snap(state.viewW), state.viewH - y);
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(PX, y + PX, Math.max(PX, snap(state.viewW) - 2 * PX), Math.max(PX, h - 2 * PX));
+    for (let i = 0; i < lines.length; i++) drawText(lines[i], 2 * PX, y + PX + i * 8 * PX, INK);
     return y;
   }
 
   function drawHud() {
     const y = PX;
-    const narrow = state.viewW < 560;
+    const narrow = state.viewW < 420;
     const dex = placeButton(PX, y, 'dex', 'DEX');
-    const battleLabel = narrow ? 'BTL' : 'BATTLE';
-    const bw = buttonSize(battleLabel).w;
-    const battle = placeButton(snap(state.viewW - bw - PX), y, 'battle', battleLabel);
     const soundLabel = IslandAudio.isMuted() ? (narrow ? 'MUT' : 'MUTE') : (narrow ? 'SND' : 'SOUND');
     const sw = buttonSize(soundLabel).w;
-    placeButton(snap(battle.x - sw - PX), y, 'sound', soundLabel);
+    const sound = placeButton(snap(state.viewW - sw - PX), y, 'sound', soundLabel);
     const count = caughtCount() + '/15';
     const cx = dex.x + dex.w + PX;
-    const roomRight = battle.x - sw - PX;
-    if (roomRight - cx >= textW(count) + 2 * PX) {
+    if (sound.x - cx >= textW(count) + 2 * PX) {
       ctx.fillStyle = INK;
       ctx.fillRect(cx, y, textW(count) + 2 * PX, 10 * PX);
       drawText(count, cx + PX, y + PX, PAPER);
     }
-    return Math.max(dex.bottom, battle.bottom);
+    return Math.max(dex.bottom, sound.bottom);
   }
 
   function gridSil(src, dw, dh) {
@@ -849,11 +932,13 @@
     const mon = enc.mon;
     const sil = spriteSil[mon.id];
     if (!sil) return;
-    // Fixed screen band: below Red's sprite, above the disclaimer. Camera stays put.
+    // Screen overlay only. Red's world position and camera are not touched.
     const redBottom = snap(state.y - state.camY - SPRITE + PX) + SPRITE;
     const bandTop = snap(redBottom + 2 * PX);
     const bandBottom = snap(footTop - PX);
-    const bandH = Math.max(0, bandBottom - bandTop);
+    const bandH = Math.max(TW * 3, bandBottom - bandTop);
+    const outerW = Math.max(TW * 3, Math.floor((state.viewW - 2 * PX) / TW) * TW);
+    const innerW = outerW - 2 * TW;
     let step = 1;
     let lay = null;
     while (step <= 8) {
@@ -861,36 +946,60 @@
       const dh = Math.max(1, (sil.height / step) | 0);
       const cssW = dw * PX;
       const cssH = dh * PX;
-      const maxW = snap(Math.min(state.viewW - 2 * PX, Math.max(cssW + 4 * PX, textW('BACK AWAY') + 8 * PX)));
-      const inner = maxW - 4 * PX;
-      const away = buttonSize('BACK AWAY', inner);
-      const cat = buttonSize('CATCH!', inner);
-      const h = snap(2 * PX + cssH + PX + away.h + PX + cat.h + 2 * PX);
-      lay = { dw: dw, dh: dh, cssW: cssW, cssH: cssH, maxW: maxW, inner: inner, h: h };
-      if (h <= bandH) break;
+      const away = buttonSize('BACK AWAY', innerW - 4 * PX);
+      const cat = buttonSize('CATCH!', innerW - 4 * PX);
+      const innerH = snap(PX + cssH + PX + away.h + PX + cat.h + PX);
+      const outerH = Math.ceil(innerH / TW) * TW + 2 * TW;
+      lay = { dw: dw, dh: dh, cssW: cssW, cssH: cssH, innerW: innerW, away: away, cat: cat, outerH: outerH };
+      if (outerH <= bandH) break;
       step++;
     }
-    // Sit on the bottom of that band so the block stays in the lower grass, not on Red.
-    let y = snap(bandBottom - lay.h);
+    let y = snap(bandBottom - lay.outerH);
     if (y < bandTop) y = bandTop;
-    const x = snap((state.viewW - lay.maxW) / 2);
-    const panelH = Math.max(PX, Math.min(lay.h, bandBottom - y));
-    drawPanel(x, y, lay.maxW, panelH);
+    const x = snap((state.viewW - outerW) / 2);
+    const box = drawRedBox(x, y, outerW, lay.outerH);
     const sprite = gridSil(sil, lay.dw, lay.dh);
     ctx.imageSmoothingEnabled = false;
-    const sx = snap(x + (lay.maxW - lay.cssW) / 2);
-    const sy = snap(y + 2 * PX);
-    if (sy + lay.cssH <= bandBottom) {
+    const sx = snap(box.ix + (box.iw - lay.cssW) / 2);
+    const sy = snap(box.iy + PX);
+    if (sy + lay.cssH <= box.y + box.h - TW) {
       ctx.drawImage(sprite, 0, 0, sprite.width, sprite.height, sx, sy, lay.cssW, lay.cssH);
     }
     let by = snap(sy + lay.cssH + PX);
-    const away = buttonSize('BACK AWAY', lay.inner);
-    if (by + away.h <= bandBottom) {
-      const awayBtn = placeButton(x + 2 * PX, by, 'away', 'BACK AWAY', lay.inner);
+    if (by + lay.away.h <= box.iy + box.ih) {
+      const awayBtn = placeButton(box.ix + 2 * PX, by, 'away', 'BACK AWAY', box.iw - 4 * PX);
       const catchY = snap(awayBtn.bottom + PX);
-      if (catchY + buttonSize('CATCH!', lay.inner).h <= bandBottom) {
-        placeButton(x + 2 * PX, catchY, 'catch', 'CATCH!', lay.inner);
+      if (catchY + lay.cat.h <= box.iy + box.ih) {
+        placeButton(box.ix + 2 * PX, catchY, 'catch', 'CATCH!', box.iw - 4 * PX);
       }
+    }
+  }
+
+  let promptBlink = 0;
+  function drawSignBox() {
+    const s = state.sign;
+    if (!s) return;
+    promptBlink++;
+    const w = Math.max(TW * 3, Math.floor(state.viewW / TW) * TW);
+    const x = snap((state.viewW - w) / 2);
+    const flat = [];
+    const limit = w - 2 * TW - 2 * PX;
+    for (let i = 0; i < s.lines.length; i++) {
+      const wrapped = wrapLines(s.lines[i], limit);
+      for (let k = 0; k < wrapped.length; k++) flat.push(wrapped[k]);
+    }
+    const h = TW * (2 + Math.max(1, flat.length));
+    let y = snap(state.viewH - h - PX);
+    if (y < 14 * PX) y = 14 * PX;
+    const box = drawRedBox(x, y, w, h);
+    for (let i = 0; i < flat.length; i++) drawText(flat[i], box.ix + PX, box.iy + i * 8 * PX, INK);
+    if (((promptBlink / 18) | 0) % 2 === 0) {
+      const ax = box.x + box.w - TW + 2 * PX;
+      const ay = box.y + box.h - TW + 3 * PX;
+      ctx.fillStyle = INK;
+      ctx.fillRect(ax, ay, PX, PX);
+      ctx.fillRect(ax - PX, ay + PX, 3 * PX, PX);
+      ctx.fillRect(ax, ay + 2 * PX, PX, PX);
     }
   }
 
@@ -1094,7 +1203,7 @@
       return;
     }
     drawHud();
-    const foot = drawFooter();
+    const foot = state.viewH;
     if (state.mode === 'dex') {
       drawDex(foot);
       return;
@@ -1103,9 +1212,10 @@
       drawThrow(foot);
       return;
     }
-    if (enc.phase === 'chip') drawChip(foot);
-    else if (state.moved < 80) {
-      const msg = 'HOLD GROUND TO WALK';
+    if (state.mode === 'sign') drawSignBox();
+    if (enc.phase === 'chip' && state.mode === 'explore') drawChip(foot);
+    else if (state.mode === 'explore' && state.moved < 80 && enc.phase !== 'chip') {
+      const msg = 'DRAG TO WALK';
       const tw = textW(msg);
       const x = snap((state.viewW - tw) / 2 - 2 * PX);
       const y = 16 * PX;
@@ -1123,6 +1233,7 @@
     }
     if (id === 'battle') { window.location.href = '../'; return; }
     if (id === 'dex') {
+      if (state.mode === 'sign') closeSign();
       if (state.mode === 'explore') openDex();
       return;
     }
@@ -1277,8 +1388,7 @@
     enc.drag = false;
     enc.ax = state.x;
     enc.ay = state.y;
-    state.path = [];
-    state.hold = false;
+    holdCam();
     IslandAudio.encounter();
   }
 
@@ -1293,8 +1403,9 @@
     enc.trail = [];
     enc.stars = [];
     state.mode = 'throw';
-    state.path = [];
-    state.hold = false;
+    stick.on = false;
+    stick.dir = null;
+    holdCam();
     IslandAudio.click();
   }
 
@@ -1308,6 +1419,9 @@
     state.mode = 'explore';
     state.cooldown = 4.4;
     state.steps = 0;
+    stick.on = false;
+    stick.dir = null;
+    holdCam();
   }
 
   function catchChance(mon, curved) {
@@ -1380,13 +1494,16 @@
   function openDex() {
     if (state.mode !== 'explore') return;
     IslandAudio.book();
-    state.path = [];
-    state.hold = false;
+    stick.on = false;
+    stick.dir = null;
+    holdCam();
     state.mode = 'dex';
     dexScroll = 0;
   }
   function closeDex() {
-    if (state.mode === 'dex') state.mode = 'explore';
+    if (state.mode !== 'dex') return;
+    holdCam();
+    state.mode = 'explore';
   }
 
   let last = performance.now();
@@ -1414,9 +1531,11 @@
   function startGame() {
     if (!ready) return;
     IslandAudio.unlock();
+    IslandAudio.startMusic();
     IslandAudio.click();
     state.mode = 'explore';
     resize();
+    holdCam();
   }
 
   function wire() {
