@@ -51,6 +51,7 @@ img { image-rendering: pixelated; image-rendering: crisp-edges; }
 .title-row { display: flex; gap: 4px; align-items: flex-end; }
 .title-row img { width: 72px; height: 72px; object-fit: contain; }
 .title-row img.bro { background: var(--paper); width: 84px; height: 84px; }
+.title-row img.red { width: 64px; height: 64px; background: var(--paper); }
 .pbtn {
   font-size: 13px; color: var(--ink); background: var(--paper);
   border: var(--b) solid var(--ink); border-radius: 4px;

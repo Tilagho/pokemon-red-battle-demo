@@ -4,7 +4,7 @@ A small overworld catch-and-collect page in the spirit of a Gen 1 pixel game and
 
 > Unofficial fan project. Not affiliated with Nintendo, Game Freak, or The Pokémon Company.
 
-The battle demo at the site root is separate. This page does not load anything from `island/assets/red/` (that folder, if present, is reserved and unused).
+The battle demo at the site root is separate. The live overworld loads Pokémon Red tiles, Red's walk sprite, and the Poké Ball from `island/assets/red/`.
 
 ## Run it
 
@@ -19,11 +19,11 @@ Open http://localhost:8000/island/ on a computer, or http://&lt;your-lan-ip&gt;:
 ## Controls
 
 - **Hold the ground** (or press and drag) on walkable land. Red pathfinds there and keeps walking if you let go. Drag while held to change the destination. Water, trees, rocks, and walls are blocked. There is no D-pad.
-- The camera follows the player. From the town center to the coast, straight ahead, is **15 tiles**. Walk speed is **3 tiles/second** (192 px/s on 64px tiles), so that walk is **5 seconds**.
+- The camera follows the player. From the town center to the coast, straight ahead, is **15 cells**. Each cell is a 32×32 Red block drawn at 2× (64px), and Red's 16×16 sprite uses that same scale. Walk speed is **192 px/s**, so that walk is **5 seconds**.
 - Stepping through tall grass, forest, shore, and the other encounter biomes can start a wild encounter. It is not every step: a short warmup, then a per-tile roll, then a few seconds of quiet after each encounter.
 - **Hold the Poké Ball**, watch the arc and the meter, then **release** to throw. A very short hold misses. A fuller hold is more likely to catch.
 - Three failed throws can make the Pokémon flee; the fourth always does. **Back away** leaves without throwing.
-- A catch plays a short success flourish and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). The HUD button opens the dex. **SOUND** mutes Kenney effects and the synthesized stingers (`pogo-island-mute`).
+- A catch plays a short success flourish and adds the species to the Pokédex (saved in this browser as `pogo-island-dex`). The HUD button opens the dex. **SOUND** mutes the Kenney effects and the synthesized stingers (`pogo-island-mute`).
 - **BATTLE** returns to the root battle demo.
 
 ## Biome → type
@@ -52,21 +52,35 @@ Paths are the north–south and east–west roads through town, except a strip o
 
 ## `assets/red/`
 
-If `island/assets/red/` exists, it is reserved for later internal use. The live demo does not reference it.
+The live demo loads this folder for the overworld. See `assets/red/README.md`.
+
+| Biome | Sheet |
+| --- | --- |
+| Meadow, tall grass, path, town, water, waterfall | `tiles/overworld.png` |
+| Shore | `tiles/ship_port.png` (dock) |
+| Forest and dark forest | `tiles/forest.png` (dark woods use a tint) |
+| Mountain, dojo yard, ruins, volcanic rock | `tiles/plateau.png` (volcanic uses a tint) |
+| Dirt and ice | `tiles/cavern.png` (ice uses a tint; Gen 1 has no ice tileset) |
+| Trees, rocks, bushes, houses | Tile blocks inside overworld, forest, and plateau |
+| Player walk | `sprites/red.png` (16×16 down / up / left, walk frames; right is flipped) |
+| Title portrait | `player/red.png` (56×56 Red pic) |
+| Poké Ball | `sprites/poke_ball.png` |
+
+`tiles/pokecenter.png` and `tiles/reds_house.png` load with the Red set. Indoor rooms are not drawn on the island. Bulbasaur stays the brother's sprite. The other encounter fronts stay PokeAPI Generation I Yellow.
+
+> Unofficial fan project. Pokémon Red graphics are Nintendo / Game Freak / The Pokémon Company intellectual property. Not affiliated with them.
 
 ## Asset credits
 
 | Asset | Source | License |
 | --- | --- | --- |
-| Overworld tiles | [Kenney RPG pack base set](https://opengameart.org/content/rpg-pack-base-set) in `assets/tiles/kenney-rpg/` (PNG tiles + `RPGpack_sheet.png`) | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| Overworld tiles, Red walk, Red pic, Poké Ball | [pret/pokered](https://github.com/pret/pokered) `gfx/` in `assets/red/` | Nintendo IP. Fan demo only. Tiago approved committing these files |
 | Footsteps, book, click | [Kenney 50 RPG sound effects](https://opengameart.org/content/50-rpg-sound-effects) in `assets/sfx/` | CC0 |
 | Throw / catch / flee stingers | Original Web Audio in `js/audio.js` | Same terms as this project. No ROM audio |
-| Player walk | [Tnypixels top-down walk & idle](https://tnypixels.itch.io/top-down-rpg-character-sprite-walk-idle-animation), CC0. `assets/player/character-sprites.aseprite` is the pack file; `walk.png` is a 4×4 sheet exported from it (rows: down, left, right, up; 4 walk frames) | CC0 |
 | Bulbasaur | Brother's art, `assets/sprites/bulbasaur.png` (copy of the repo sprite; the original file is unchanged) | Used with permission for this fan demo |
 | Other front sprites | [PokeAPI](https://pokeapi.co) Generation I Yellow transparent sprites | Pokémon artwork is property of Nintendo / Game Freak / The Pokémon Company. Fan demo only |
-| Poké Ball icon | PokeAPI `items/poke-ball` | Same fan-demo note |
 | Press Start 2P | Repo font, SIL Open Font License (`../../assets/fonts/OFL.txt`) | OFL |
 
-Kenney credit is not required by CC0. It is noted here anyway: Kenney.nl.
+Kenney tiles and the Tnypixels walk sheet remain in the repo. The live overworld does not draw them.
 
-Biome tints (dark woods, volcanic rock, ice, waterfall spray) are drawn over Kenney floors in the canvas. They are not a second tileset.
+Biome tints (dark woods, volcanic rock, ice, waterfall spray) are drawn over the Red floors in the canvas. They are not a second tileset.

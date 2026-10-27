@@ -2,7 +2,8 @@
    Sprites for the 14 non-Bulbasaur species are PokeAPI Gen-I Yellow
    transparent fronts. Bulbasaur is the brother's art already in the repo. */
 const ISLAND_DATA = {
-  // 15 tiles from the town center to the coast, at 3 tiles/sec, is 5 seconds.
+  // One cell is a 32×32 Red block drawn at 2× (64px). 15 cells at 192px/s is 5 seconds.
+  // The player sprite is the 16×16 Red walk cycle at that same 2× scale.
   TILE: 64,
   MAP: 37,
   CENTER: 18,
