@@ -1525,7 +1525,10 @@
     drawText(name, snap(x + (w - textW(name)) / 2), y + 2 * PX, INK);
     drawText(mon.type, snap(x + (w - textW(mon.type)) / 2), y + 12 * PX, INK);
     const showAway = enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled';
-    const awayH = showAway ? buttonSize('BACK AWAY', w - 4 * PX).h : 0;
+    /* Always reserve the button row. Dropping it mid-throw used to grow the
+       fill-scale, so the Pokémon and the ring jumped bigger in the air and
+       smaller again when the button came back. */
+    const awayH = buttonSize('BACK AWAY', w - 4 * PX).h;
     const ballY = snap(y + h - awayH - BALL - 3 * PX);
     const ballX = snap(x + (w - BALL) / 2);
     ui.ballHome = { x: ballX, y: ballY, w: BALL, h: BALL };
