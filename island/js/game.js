@@ -1468,7 +1468,7 @@
       drawBallAt(ui.mon.x + ui.mon.w / 2 - BALL / 2 + dir * PX, ui.mon.y + ui.mon.h / 2 - BALL / 2);
     } else if (enc.phase !== 'caught' && enc.phase !== 'fled') {
       if (enc.phase === 'flight') drawTrail(enc.trail, BALL / 2, BALL / 2);
-      else if (enc.drag) drawTrail(enc.pts, 0, 0);
+      else if (enc.drag) drawAimArc();
       drawBallAt(enc.bx, enc.by);
     }
     if (showAway) placeButton(x + 2 * PX, snap(y + h - awayH - PX), 'away', enc.phase === 'aim' ? 'BACK AWAY' : 'WALK', w - 4 * PX);
@@ -1744,13 +1744,13 @@
     if (enc.spin < -6) enc.spin = -6;
   }
 
-  function releaseThrow() {
-    const pts = enc.pts;
-    enc.drag = false;
-    if (enc.phase !== 'aim' || !pts || pts.length < 2 || !ui.mon) {
-      enc.spin = 0;
-      return;
-    }
+  /* px/s that carries the ball from the hand to the Pokémon. A normal phone
+     flick used to clear the old 2600 cutoff and sail past; that same flick now
+     lands in the ring. Slower flicks fall short. A harder one still goes long. */
+  const FLICK_HIT_SPEED = 3200;
+
+  function flickVelocity(pts) {
+    if (!pts || pts.length < 2) return { vx: 0, vy: 0, speed: 0 };
     const b = pts[pts.length - 1];
     let i = pts.length - 1;
     while (i > 0 && b.t - pts[i - 1].t < 90) i--;
@@ -1758,35 +1758,126 @@
     const dt = Math.max(0.016, (b.t - a.t) / 1000);
     const vx = (b.x - a.x) / dt;
     const vy = (b.y - a.y) / dt;
-    const speed = Math.hypot(vx, vy);
+    return { vx: vx, vy: vy, speed: Math.hypot(vx, vy) };
+  }
+
+  function flightPoint(s, u) {
+    const e = u < 1 ? (1 - Math.pow(1 - u, 2)) : u;
+    const dx = s.x1 - s.x0;
+    const dy = s.y1 - s.y0;
+    const plen = Math.hypot(dx, dy) || 1;
+    const bulge = Math.sin(Math.min(u, 1) * Math.PI);
+    return {
+      x: s.x0 + dx * e + (-dy / plen) * bulge * s.side,
+      y: s.y0 + dy * e + (dx / plen) * bulge * s.side - bulge * s.lob,
+    };
+  }
+
+  function planThrow(vel, x0, y0) {
+    const mon = ui.mon;
+    const tx = mon.x + mon.w / 2;
+    const ty = mon.y + mon.h / 2;
+    const dx = tx - x0;
+    const dy = ty - y0;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist;
+    const uy = dy / dist;
     const spun = Math.abs(enc.spin) >= 0.85;
-    /* A tiny twitch is too short to leave the hand. A violent swipe sails past.
-       Release angle does not decide a miss: a real flick, and any curve, homes in. */
-    if (speed < 400 || (!spun && vy > -40)) {
+    const ratio = Math.min(2.4, Math.pow(Math.max(0, vel.speed) / FLICK_HIT_SPEED, 1.06));
+    const travel = dist * ratio;
+    let sideShift = Math.max(-dist, Math.min(dist, vel.vx * 0.07));
+    if (spun) sideShift *= 0.35;
+    let x1 = x0 + ux * travel + sideShift;
+    let y1 = y0 + uy * travel;
+    if (spun) {
+      x1 += (tx - x1) * 0.55;
+      y1 += (ty - y1) * 0.16;
+    }
+    const half = Math.max(mon.w, mon.h) / 2;
+    const minR = Math.max(14 * PX, half * 0.58);
+    const maxR = Math.max(minR + 12 * PX, half * 1.02);
+    const hitR = Math.max(maxR, half * 0.95);
+    const toMon = Math.hypot(x1 - tx, y1 - ty);
+    const dyHit = y1 - ty;
+    let miss = null;
+    if (toMon <= hitR) miss = null;
+    else if (dyHit > hitR * 0.4) miss = 'short';
+    else if (dyHit < -hitR * 0.28) miss = 'long';
+    else miss = 'wide';
+    if (!miss) {
+      x1 = tx;
+      y1 = ty;
+    } else if (miss === 'long') {
+      const past = ty - Math.max(hitR + 12 * PX, mon.h * 0.75);
+      if (y1 > past) y1 = past;
+    } else if (miss === 'short' && ui.ballHome) {
+      const dock = ui.ballHome.y - 4 * PX;
+      if (y1 > dock) y1 = dock;
+      const minTravel = 64;
+      if (travel < minTravel) {
+        x1 = x0 + ux * minTravel + sideShift * 0.25;
+        y1 = Math.min(dock, y0 + uy * minTravel);
+      }
+    }
+    const bow = spun ? 0 : Math.min(64, dist * 0.14);
+    const side = spun
+      ? Math.sign(enc.spin || 1) * Math.min(96, 40 + Math.abs(enc.spin) * 12)
+      : sideShift * 0.2 + bow;
+    const lob = (spun ? 32 : 48) + 20 * Math.min(1.2, ratio);
+    const dur = 0.4 + 0.26 * Math.min(1.35, Math.max(0.35, ratio));
+    return {
+      x0: x0,
+      y0: y0,
+      x1: x1,
+      y1: y1,
+      miss: miss,
+      dur: dur,
+      side: side,
+      lob: lob,
+      t: 0,
+      bounces: miss === 'short' ? 2 : 0,
+    };
+  }
+
+  function drawAimArc() {
+    if (!ui.mon) return;
+    const vel = flickVelocity(enc.pts);
+    let v = vel;
+    if (v.speed < 360) {
+      const scale = Math.max(0.28, v.speed / 360);
+      v = { vx: vel.vx * 0.2, vy: -FLICK_HIT_SPEED * 0.48 * scale, speed: FLICK_HIT_SPEED * 0.48 * scale };
+    }
+    const x0 = enc.bx + BALL / 2;
+    const y0 = enc.by + BALL / 2;
+    const shot = planThrow(v, x0, y0);
+    const dots = 12;
+    for (let i = 1; i <= dots; i++) {
+      const p = flightPoint(shot, (i / dots) * 0.94);
+      ctx.fillStyle = i % 2 ? INK : SHADE;
+      ctx.fillRect(snap(p.x) - PX, snap(p.y) - PX, PX * 2, PX * 2);
+    }
+  }
+
+  function releaseThrow() {
+    const pts = enc.pts;
+    enc.drag = false;
+    if (enc.phase !== 'aim' || !pts || pts.length < 2 || !ui.mon) {
+      enc.spin = 0;
+      return;
+    }
+    const vel = flickVelocity(pts);
+    const spun = Math.abs(enc.spin) >= 0.85;
+    /* A tap stays in the hand. Any real upward flick flies; power picks the spot. */
+    if (vel.speed < 360 || vel.vy > -50) {
       enc.spin = 0;
       enc.note = 'TOO SHORT!';
       return;
     }
-    const mon = ui.mon;
-    const x0 = enc.bx + BALL / 2;
-    const y0 = enc.by + BALL / 2;
-    const tx = mon.x + mon.w / 2;
-    const ty = mon.y + mon.h / 2;
-    const long = speed > 2600;
     enc.curved = spun;
     if (!enc.curved) enc.spin = 0;
-    const side = enc.curved ? Math.sign(enc.spin || 1) * Math.min(104, 64 + Math.abs(enc.spin) * 14) : 0;
-    enc.shot = {
-      x0: x0,
-      y0: y0,
-      x1: long ? tx + side * 0.35 : tx,
-      y1: long ? ty - Math.max(mon.h, 18 * PX) - 36 * PX : ty,
-      miss: long,
-      dur: long ? 0.5 : (enc.curved ? 0.78 : 0.62),
-      side: long ? side * 0.4 : side,
-      lob: enc.curved ? 28 : 56,
-      t: 0,
-    };
+    const x0 = enc.bx + BALL / 2;
+    const y0 = enc.by + BALL / 2;
+    enc.shot = planThrow(vel, x0, y0);
     enc.phase = 'flight';
     enc.flightT = 0;
     enc.ballRot = 0;
@@ -1802,13 +1893,9 @@
       const s = enc.shot;
       s.t += dt;
       const u = Math.min(1.02, s.t / s.dur);
-      const e = u < 1 ? (1 - Math.pow(1 - u, 2)) : u;
-      const dx = s.x1 - s.x0;
-      const dy = s.y1 - s.y0;
-      const plen = Math.hypot(dx, dy) || 1;
-      const bulge = Math.sin(Math.min(u, 1) * Math.PI);
-      const cx = s.x0 + dx * e + (-dy / plen) * bulge * s.side;
-      const cy = s.y0 + dy * e + (dx / plen) * bulge * s.side - bulge * s.lob;
+      const p = flightPoint(s, u);
+      const cx = p.x;
+      const cy = p.y;
       enc.bx = cx - BALL / 2;
       enc.by = cy - BALL / 2;
       const spinDir = enc.spin < 0 ? -1 : 1;
@@ -1820,7 +1907,24 @@
       if (!last || Math.hypot(sx - last.x, sy - last.y) >= PX * 2) enc.trail.push({ x: sx, y: sy });
       if (enc.trail.length > 22) enc.trail.shift();
       if (u >= 1) {
-        if (s.miss) missBall();
+        if (s.bounces > 0) {
+          const hop = (14 + s.bounces * 8) * PX;
+          enc.shot = {
+            x0: s.x1,
+            y0: s.y1,
+            x1: s.x1 + Math.max(-28, Math.min(28, (s.x1 - s.x0) * 0.16)),
+            y1: s.y1,
+            miss: 'short',
+            dur: 0.32,
+            side: 0,
+            lob: hop,
+            t: 0,
+            bounces: s.bounces - 1,
+          };
+          enc.bx = s.x1 - BALL / 2;
+          enc.by = s.y1 - BALL / 2;
+          IslandAudio.bump();
+        } else if (s.miss) missBall();
         else landBall();
       }
     } else if (enc.phase === 'shake') {
@@ -1912,11 +2016,11 @@
   }
 
   function missBall() {
-    const tooLong = enc.shot && enc.shot.miss;
+    const why = enc.shot && enc.shot.miss;
     enc.trail = [];
     enc.shot = null;
     enc.tries++;
-    enc.note = tooLong ? 'TOO LONG!' : 'THE BALL MISSED!';
+    enc.note = why === 'long' ? 'TOO LONG!' : why === 'short' ? 'TOO SHORT!' : 'THE BALL MISSED!';
     enc.phase = 'aim';
     enc.spin = 0;
     enc.drag = false;
