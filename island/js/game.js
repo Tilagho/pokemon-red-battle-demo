@@ -120,6 +120,12 @@
   let waterFrame = 0;
   let waterTick = 0;
   let dexScroll = 0;
+  let dexPick = null;
+  let dexSpin = 0;
+  let turnSheet = null;
+  const TURN_ID = 'bulbasaur';
+  const TURN_N = 8;
+  const TURN_CELL = 32;
   const spriteImg = {};
   const spriteSil = {};
   const ui = { hits: [], press: null, mon: null, ballHome: null, ballHit: null };
@@ -1543,8 +1549,23 @@
     }
     const btnH = buttonSize('OK').h;
     const by = snap(y + h - btnH - 2 * PX);
-    const bw = snap((w - 8 * PX) / 3);
     const listTop = y + 2 * PX + titleLines.length * 8 * PX + PX;
+    if (dexPick === TURN_ID && turnSheet) {
+      dexSpin++;
+      const name = 'BULBASAUR';
+      drawText(name, snap(x + (w - textW(name)) / 2), listTop, INK);
+      drawText('GRASS', snap(x + (w - textW('GRASS')) / 2), listTop + 10 * PX, INK);
+      const frame = ((dexSpin / 8) | 0) % TURN_N;
+      const dw = TURN_CELL * PX;
+      const dh = dw;
+      const dx = snap(x + (w - dw) / 2);
+      const dy = snap(listTop + 20 * PX);
+      crisp();
+      ctx.drawImage(turnSheet, frame * TURN_CELL, 0, TURN_CELL, TURN_CELL, dx, dy, dw, dh);
+      placeButton(x + 2 * PX, by, 'dexclose', 'BACK', w - 4 * PX);
+      return;
+    }
+    const bw = snap((w - 8 * PX) / 3);
     const rowH = 10 * PX;
     const rows = Math.max(1, Math.floor((by - PX - listTop) / rowH));
     const maxScroll = Math.max(0, D.species.length - rows);
@@ -1554,7 +1575,11 @@
       const s = D.species[i + dexScroll];
       if (!s) break;
       const have = dex.indexOf(s.id) >= 0;
-      drawText(have ? s.name : '???', x + 2 * PX, listTop + i * rowH, have ? INK : SHADE);
+      const ry = listTop + i * rowH;
+      drawText(have ? s.name : '???', x + 2 * PX, ry, have ? INK : SHADE);
+      if (have && s.id === TURN_ID) {
+        ui.hits.push({ id: 'dexspin', x: x, y: ry, w: w, h: rowH });
+      }
     }
     placeButton(x + 2 * PX, by, 'dexup', 'UP', bw);
     placeButton(x + 4 * PX + bw, by, 'dexdown', 'DN', bw);
@@ -1590,6 +1615,10 @@
     const x = snap((state.viewW - boxW) / 2);
     const y = snap(foot - boxH);
     const box = drawRedBox(x, y, boxW, boxH);
+    const room = Math.max(PX * 2, box.iw - PX * 2);
+    const glide = (promptBlink * PX) % room;
+    ctx.fillStyle = MID;
+    ctx.fillRect(snap(box.ix + glide), box.y + 3 * PX, PX * 2, PX);
     const rh = Math.max(8 * PX, Math.floor(box.ih / items.length / PX) * PX);
     const blink = ((promptBlink / 18) | 0) % 2 === 0;
     for (let i = 0; i < items.length; i++) {
@@ -1613,11 +1642,12 @@
     ctx.fillRect(0, 0, state.viewW, state.viewH);
     const foot = drawFooter();
     promptBlink++;
+    const intro = Math.max(0, 6 - ((promptBlink / 5) | 0));
     const items = titleItems();
     const rowH = 10 * PX;
     const menuH = items.length ? Math.ceil((TW * 2 + items.length * rowH) / TW) * TW : 0;
     const menuTop = foot - menuH;
-    let y = 2 * PX;
+    let y = 2 * PX + intro * PX;
     const scale = textWAt('POKEMON', 2) <= state.viewW - 2 * PX ? 2 : 1;
     drawTextAt('POKEMON', snap((state.viewW - textWAt('POKEMON', scale)) / 2), y, PAPER, scale);
     y += (8 * scale + 1) * PX;
@@ -1631,9 +1661,14 @@
     if (redPic) {
       const pw = redPic.width * PX;
       const ph = redPic.height * PX;
-      if (y + ph + PX < menuTop) {
+      const bobSteps = [0, 0, 1, 1, 2, 1, 1, 0, 0, -1, -1, -2, -1, -1];
+      const swaySteps = [-1, 0, 1, 0];
+      const bob = bobSteps[((promptBlink / 6) | 0) % bobSteps.length] * PX;
+      const sway = swaySteps[((promptBlink / 9) | 0) % swaySteps.length] * PX;
+      const py = y + bob;
+      if (py + ph + PX < menuTop) {
         crisp();
-        ctx.drawImage(redPic, 0, 0, redPic.width, redPic.height, snap((state.viewW - pw) / 2), y, pw, ph);
+        ctx.drawImage(redPic, 0, 0, redPic.width, redPic.height, snap((state.viewW - pw) / 2 + sway), py, pw, ph);
       }
     }
     drawTitleMenu(foot);
@@ -1643,7 +1678,6 @@
   function pauseItems() {
     return [
       { id: 'vol', label: IslandAudio.isMuted() ? 'VOL OFF' : 'VOL ON' },
-      { id: 'gfx', label: graphicsMode === 'color' ? 'GFX COLOR' : 'GFX MONO' },
       { id: 'save', label: 'SAVE' },
       { id: 'tomain', label: 'MAIN MENU' },
     ];
@@ -1732,12 +1766,6 @@
       IslandAudio.click();
       return;
     }
-    if (id === 'gfx') {
-      setGraphics(graphicsMode === 'color' ? 'mono' : 'color');
-      persistSettings();
-      IslandAudio.click();
-      return;
-    }
     if (id === 'save') { saveProgress(); IslandAudio.click(); return; }
     if (id === 'tomain') { returnToMenu(); return; }
     if (id === 'newgame') { newGame(); return; }
@@ -1747,7 +1775,13 @@
       if (state.mode === 'explore') openDex();
       return;
     }
-    if (id === 'dexclose') { IslandAudio.click(); closeDex(); return; }
+    if (id === 'dexclose') {
+      if (dexPick) { dexPick = null; IslandAudio.click(); return; }
+      IslandAudio.click();
+      closeDex();
+      return;
+    }
+    if (id === 'dexspin') { dexPick = TURN_ID; dexSpin = 0; IslandAudio.click(); return; }
     if (id === 'dexup') { dexScroll = Math.max(0, dexScroll - 1); IslandAudio.click(); return; }
     if (id === 'dexdown') { dexScroll += 1; IslandAudio.click(); return; }
     if (id === 'away') {
@@ -2134,9 +2168,11 @@
     holdCam();
     state.mode = 'dex';
     dexScroll = 0;
+    dexPick = null;
   }
   function closeDex() {
     if (state.mode !== 'dex') return;
+    dexPick = null;
     holdCam();
     state.mode = 'explore';
   }
@@ -2575,10 +2611,6 @@
       spriteSil[s.id] = silhouetteOf(spriteImg[s.id]);
     });
   }
-  function setGraphics(mode) {
-    graphicsMode = mode === 'color' ? 'color' : 'mono';
-    if (rawSheets) applyGraphics();
-  }
 
   async function boot() {
     buildMap();
@@ -2607,10 +2639,10 @@
       rawBall = imgs[keys.length + 2];
       rawSpecies = imgs.slice(keys.length + 3);
       const saved = readSave();
-      if (saved && (saved.graphics === 'color' || saved.graphics === 'mono')) graphicsMode = saved.graphics;
       if (saved && saved.volume === 'off') IslandAudio.setMuted(true);
       else if (saved && saved.volume === 'on') IslandAudio.setMuted(false);
       applyGraphics();
+      try { turnSheet = await loadImage('assets/dex/bulbasaur-turn.png'); } catch (e) { turnSheet = null; }
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
       ready = true;
     } catch (err) {
