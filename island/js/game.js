@@ -1374,12 +1374,69 @@
     }
   }
 
-  function drawTrail(pts, ox, oy) {
+  /* Filled pixel disc. Size and origin stay on the 4× grid. */
+  function drawDisc(cx, cy, size, color) {
+    size = Math.max(PX * 2, snap(size));
+    const r = size / 2;
+    ctx.fillStyle = color;
+    const rows = Math.max(2, Math.round(size / PX));
+    for (let i = 0; i < rows; i++) {
+      const py = snap(cy - r) + i * PX;
+      const dy = (py + PX / 2) - cy;
+      const rest = r * r - dy * dy;
+      if (rest <= 0) continue;
+      const half = Math.sqrt(rest);
+      const x0 = snap(cx - half);
+      const x1 = snap(cx + half);
+      if (x1 > x0) ctx.fillRect(x0, py, x1 - x0, PX);
+    }
+  }
+
+  /* Afterimage of the ball: a disc, the black belt, and the white button. */
+  function drawGhostBall(cx, cy, size, color) {
+    size = Math.max(PX * 4, snap(size));
+    drawDisc(cx, cy, size, color);
+    const belt = Math.max(PX, snap(size * 0.14));
+    ctx.fillStyle = INK;
+    ctx.fillRect(snap(cx - size / 2), snap(cy - belt / 2), size, belt);
+    const btn = Math.max(PX * 2, snap(size * 0.2));
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(snap(cx - btn / 2), snap(cy - btn / 2), btn, btn);
+    ctx.fillStyle = INK;
+    ctx.fillRect(snap(cx - btn / 2), snap(cy - PX / 2), btn, PX);
+  }
+
+  function trailColor(t) {
+    if (t > 0.68) return RING_TIGHT;
+    if (t > 0.36) return RING_MID;
+    return RING_OPEN;
+  }
+
+  /* Fat wake plus fading ball copies. t = 0 is the old end, t = 1 is the live ball.
+     Colors are the catch-ring palette, so mono stays on the four grays and color
+     stays on the red set. Sizes snap to the 4× grid. */
+  function drawGhostTail(pts, ox, oy) {
+    if (!pts || pts.length < 2) return;
+    const centers = [];
     for (let i = 0; i < pts.length; i++) {
-      ctx.fillStyle = i % 2 ? RING_OPEN : RING_TIGHT;
-      const px = snap(pts[i].x + (ox || 0));
-      const py = snap(pts[i].y + (oy || 0));
-      ctx.fillRect(px, py, PX * 2, PX * 2);
+      centers.push({ x: pts[i].x + (ox || 0), y: pts[i].y + (oy || 0) });
+    }
+    centers.push({ x: enc.bx + BALL / 2, y: enc.by + BALL / 2 });
+    const n = centers.length;
+    const far = PX * 4;
+    const near = snap(BALL * 0.55);
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const width = snap(far + (near - far) * Math.pow(t, 1.25));
+      drawDisc(centers[i].x, centers[i].y, width, trailColor(t));
+    }
+    const copies = 6;
+    for (let s = 0; s < copies; s++) {
+      const t = (s + 0.5) / copies;
+      const idx = Math.min(n - 2, Math.max(0, Math.round(t * (n - 1))));
+      const p = centers[idx];
+      const size = snap(BALL * (0.36 + 0.5 * t));
+      drawGhostBall(p.x, p.y, size, trailColor(Math.min(0.92, t + 0.08)));
     }
   }
 
@@ -1467,8 +1524,11 @@
       const dir = Math.floor(enc.shakeT / 0.08) % 2 ? -2 : 2;
       drawBallAt(ui.mon.x + ui.mon.w / 2 - BALL / 2 + dir * PX, ui.mon.y + ui.mon.h / 2 - BALL / 2);
     } else if (enc.phase !== 'caught' && enc.phase !== 'fled') {
-      if (enc.phase === 'flight') drawTrail(enc.trail, BALL / 2, BALL / 2);
-      else if (enc.drag) drawAimArc();
+      if (enc.phase === 'flight') drawGhostTail(enc.trail, BALL / 2, BALL / 2);
+      else if (enc.drag) {
+        drawGhostTail(enc.pts, 0, 0);
+        drawAimArc();
+      }
       drawBallAt(enc.bx, enc.by);
     }
     if (showAway) placeButton(x + 2 * PX, snap(y + h - awayH - PX), 'away', enc.phase === 'aim' ? 'BACK AWAY' : 'WALK', w - 4 * PX);
@@ -1904,8 +1964,8 @@
       const last = enc.trail[enc.trail.length - 1];
       const sx = snap(enc.bx);
       const sy = snap(enc.by);
-      if (!last || Math.hypot(sx - last.x, sy - last.y) >= PX * 2) enc.trail.push({ x: sx, y: sy });
-      if (enc.trail.length > 22) enc.trail.shift();
+      if (!last || Math.hypot(sx - last.x, sy - last.y) >= PX * 3) enc.trail.push({ x: sx, y: sy });
+      if (enc.trail.length > 48) enc.trail.shift();
       if (u >= 1) {
         if (s.bounces > 0) {
           const hop = (14 + s.bounces * 8) * PX;
