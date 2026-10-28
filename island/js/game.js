@@ -1108,12 +1108,11 @@
     };
   })();
 
-  function drawBoxPaint(paint, x, y, inkOnly) {
+  function drawBoxPaint(paint, x, y) {
     for (let row = 0; row < 8; row++) {
       let col = 0;
       while (col < 8) {
-        let p = paint[row][col];
-        if (inkOnly && p === 1) p = 0;
+        const p = paint[row][col];
         if (!p) { col++; continue; }
         let end = col + 1;
         while (end < 8 && paint[row][end] === p) end++;
@@ -1124,7 +1123,7 @@
     }
   }
 
-  function drawRedBox(x, y, w, h, inkOnly) {
+  function drawRedBox(x, y, w, h) {
     w = Math.max(TW * 3, Math.ceil(w / TW) * TW);
     h = Math.max(TW * 3, Math.ceil(h / TW) * TW);
     x = snap(x);
@@ -1146,10 +1145,7 @@
         else if (r === rows - 1) key = 'b';
         else if (c === 0) key = 'l';
         else if (c === cols - 1) key = 'r';
-        if (key) {
-          const corner = key === 'tl' || key === 'tr' || key === 'bl' || key === 'br';
-          drawBoxPaint(BOX_TILE[key], x + c * TW, y + r * TW, inkOnly && corner);
-        }
+        if (key) drawBoxPaint(BOX_TILE[key], x + c * TW, y + r * TW);
       }
     }
     return { x: x, y: y, w: w, h: h, ix: x + TW, iy: y + TW, iw: w - 2 * TW, ih: h - 2 * TW };
@@ -1593,7 +1589,7 @@
     const boxW = Math.max(TW * 10, Math.floor((state.viewW - 2 * PX) / TW) * TW);
     const x = snap((state.viewW - boxW) / 2);
     const y = snap(foot - boxH);
-    const box = drawRedBox(x, y, boxW, boxH, true);
+    const box = drawRedBox(x, y, boxW, boxH);
     const rh = Math.max(8 * PX, Math.floor(box.ih / items.length / PX) * PX);
     const blink = ((promptBlink / 18) | 0) % 2 === 0;
     for (let i = 0; i < items.length; i++) {
