@@ -1041,7 +1041,12 @@
     return { x: x, y: y, w: w, h: h };
   }
 
-  /* pret/pokered gfx/font/font_extra.png tiles $79–$7e. One tile is 8 GB px. */
+  /* pret/pokered gfx/font/font_extra.png tiles $79–$7e. One tile is 8 GB px.
+     TextBoxBorder uses the same ─ ($7a) on the top and the bottom, and the same
+     │ ($7c) on both sides. Corner tiles meet those unflipped edges.
+     0 clear, 1 paper, 2 ink. Clear pixels touch the outside of the black stroke,
+     so the map or the title shows through. Paper is only the text side of that
+     stroke (the gap between the two lines, and the padding that meets the text). */
   const BOX = {
     tl: [0, 24, 45, 126, 66, 37, 26, 20],
     t: [0, 0, 255, 0, 255, 255, 0, 0],
@@ -1061,23 +1066,6 @@
     }
     return g;
   }
-  function flipH(g) {
-    const o = [];
-    for (let y = 0; y < 8; y++) {
-      const row = [];
-      for (let x = 0; x < 8; x++) row.push(g[y][7 - x]);
-      o.push(row);
-    }
-    return o;
-  }
-  function flipV(g) {
-    const o = [];
-    for (let y = 0; y < 8; y++) o.push(g[7 - y].slice());
-    return o;
-  }
-  /* 0 clear, 1 paper, 2 ink. Clear pixels are the ones connected to the outside
-     of the frame, so the map or the title background shows through the corners.
-     The gap between the double lines and the text area stay paper. */
   function boxPaint(g, seeds) {
     const outside = [];
     for (let y = 0; y < 8; y++) outside.push([0, 0, 0, 0, 0, 0, 0, 0]);
@@ -1113,18 +1101,19 @@
       t: boxPaint(t, [[0, 0], [7, 0]]),
       tr: boxPaint(tr, [[7, 0]]),
       l: boxPaint(v, [[0, 0], [0, 7]]),
-      r: boxPaint(flipH(v), [[7, 0], [7, 7]]),
+      r: boxPaint(v, [[7, 0], [7, 7]]),
       bl: boxPaint(bl, [[0, 7]]),
-      b: boxPaint(flipV(t), [[0, 7], [7, 7]]),
+      b: boxPaint(t, [[0, 7], [7, 7]]),
       br: boxPaint(br, [[7, 7]]),
     };
   })();
 
-  function drawBoxPaint(paint, x, y) {
+  function drawBoxPaint(paint, x, y, inkOnly) {
     for (let row = 0; row < 8; row++) {
       let col = 0;
       while (col < 8) {
-        const p = paint[row][col];
+        let p = paint[row][col];
+        if (inkOnly && p === 1) p = 0;
         if (!p) { col++; continue; }
         let end = col + 1;
         while (end < 8 && paint[row][end] === p) end++;
@@ -1135,7 +1124,7 @@
     }
   }
 
-  function drawRedBox(x, y, w, h) {
+  function drawRedBox(x, y, w, h, inkOnly) {
     w = Math.max(TW * 3, Math.ceil(w / TW) * TW);
     h = Math.max(TW * 3, Math.ceil(h / TW) * TW);
     x = snap(x);
@@ -1157,7 +1146,10 @@
         else if (r === rows - 1) key = 'b';
         else if (c === 0) key = 'l';
         else if (c === cols - 1) key = 'r';
-        if (key) drawBoxPaint(BOX_TILE[key], x + c * TW, y + r * TW);
+        if (key) {
+          const corner = key === 'tl' || key === 'tr' || key === 'bl' || key === 'br';
+          drawBoxPaint(BOX_TILE[key], x + c * TW, y + r * TW, inkOnly && corner);
+        }
       }
     }
     return { x: x, y: y, w: w, h: h, ix: x + TW, iy: y + TW, iw: w - 2 * TW, ih: h - 2 * TW };
@@ -1541,7 +1533,7 @@
     const boxW = Math.max(TW * 10, Math.floor((state.viewW - 2 * PX) / TW) * TW);
     const x = snap((state.viewW - boxW) / 2);
     const y = snap(foot - boxH);
-    const box = drawRedBox(x, y, boxW, boxH);
+    const box = drawRedBox(x, y, boxW, boxH, true);
     const rh = Math.max(8 * PX, Math.floor(box.ih / items.length / PX) * PX);
     const blink = ((promptBlink / 18) | 0) % 2 === 0;
     for (let i = 0; i < items.length; i++) {
@@ -2188,7 +2180,8 @@
   const COLOR_ROOF = [rgb5(31, 31, 31), rgb5(31, 24, 20), rgb5(26, 6, 4), rgb5(3, 2, 2)];
   const ROOF_TILES = [5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 21, 22, 23, 24, 25, 26, 27, 28, 31, 34, 37, 38, 40, 41, 56, 63, 66, 67, 68, 69, 74, 75, 76, 77, 78, 79, 83, 90, 92, 93];
   const COLOR_RED = [null, [248, 248, 248], rgb5(26, 4, 4), rgb5(3, 2, 2)];
-  const COLOR_PIC = [rgb5(31, 29, 31), rgb5(30, 20, 14), rgb5(26, 4, 4), rgb5(3, 2, 2)];
+  /* Index 0 is the portrait's backdrop. Leave it clear so the title shows through. */
+  const COLOR_PIC = [null, rgb5(30, 20, 14), rgb5(26, 4, 4), rgb5(3, 2, 2)];
   let rawSheets = null;
   let rawRed = null;
   let rawPic = null;
@@ -2410,7 +2403,7 @@
     });
     if (!mono) decorateOverworld(sheets.ow);
     const redPal = mono ? [null, GB[0], GB[2], GB[3]] : COLOR_RED;
-    const picPal = mono ? GB : COLOR_PIC;
+    const picPal = mono ? [null, GB[0], GB[2], GB[3]] : COLOR_PIC;
     playerCanvas = paint(rawRed, redPal);
     buildWalkFrames();
     redPic = paint(rawPic, picPal);
