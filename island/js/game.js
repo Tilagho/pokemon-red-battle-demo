@@ -1524,8 +1524,6 @@
     const name = mon.name;
     drawText(name, snap(x + (w - textW(name)) / 2), y + 2 * PX, INK);
     drawText(mon.type, snap(x + (w - textW(mon.type)) / 2), y + 12 * PX, INK);
-    const sw = img.width * PX;
-    const sh = img.height * PX;
     const showAway = enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled';
     const awayH = showAway ? buttonSize('BACK AWAY', w - 4 * PX).h : 0;
     const ballY = snap(y + h - awayH - BALL - 3 * PX);
@@ -1537,14 +1535,21 @@
       enc.by = ballY;
     }
     const meterY = snap(ballY - 14 * PX);
-    let spriteY = y + 22 * PX;
-    const limitBottom = meterY - 4 * PX;
-    if (spriteY + sh > limitBottom) spriteY = snap(Math.max(y + 22 * PX, limitBottom - sh));
+    const view = animIndex(mon.id);
+    const aw = view ? view.a.w : img.width;
+    const ah = view ? view.a.h : img.height;
+    const areaTop = snap(y + 22 * PX);
+    const areaBot = snap(meterY - 18 * PX);
+    const availW = w - 4 * PX;
+    const availH = Math.max(8 * PX, areaBot - areaTop);
+    const fit = Math.max(1, Math.floor(Math.min(availW / aw, availH / ah)));
+    const sw = aw * fit;
+    const sh = ah * fit;
     const spriteX = snap(x + (w - sw) / 2);
+    const spriteY = snap(areaTop + (availH - sh) / 2);
     ui.mon = { x: spriteX, y: spriteY, w: sw, h: sh };
     if (!enc.hideMon) {
       crisp();
-      const view = animIndex(mon.id);
       const bob = [0, 0, PX, PX, 0, 0, -PX, 0][((animTick / 8) | 0) % 8];
       if (view) {
         ctx.drawImage(view.sheet, view.frame * view.a.w, 0, view.a.w, view.a.h, spriteX, snap(spriteY + bob), sw, sh);
@@ -1648,7 +1653,7 @@
     for (let i = 0; i < D.species.length; i++) {
       const s = D.species[i];
       const ry = listTop + i * rowH - scroll;
-      if (ry + rowH <= listTop || ry >= listTop + viewH) continue;
+      if (ry < listTop || ry + rowH > listTop + viewH) continue;
       const have = dex.indexOf(s.id) >= 0;
       drawText(have ? s.name : '???', x + 2 * PX, ry, have ? INK : SHADE);
       if (have) ui.hits.push({ id: 'dexmon:' + s.id, x: x, y: ry, w: w - 6 * PX, h: rowH });
