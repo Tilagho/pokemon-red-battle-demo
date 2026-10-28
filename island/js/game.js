@@ -121,11 +121,11 @@
   let waterTick = 0;
   let dexScroll = 0;
   let dexPick = null;
-  let dexSpin = 0;
-  let turnSheet = null;
-  const TURN_ID = 'bulbasaur';
-  const TURN_N = 8;
-  const TURN_CELL = 32;
+  let dexNudge = 0;
+  let dexDrag = null;
+  let animTick = 0;
+  const animImg = {};
+  const animSil = {};
   const spriteImg = {};
   const spriteSil = {};
   const ui = { hits: [], press: null, mon: null, ballHome: null, ballHit: null };
@@ -490,6 +490,7 @@
   }
 
   function render() {
+    animTick++;
     const w = state.viewW, h = state.viewH;
     let camX = state.x - w / 2;
     let camY = state.y - h / 2;
@@ -743,7 +744,13 @@
       ui.press = 'pause';
       return;
     }
-    if (state.mode === 'title' || state.mode === 'dex' || state.mode === 'sign' || state.mode === 'pause') {
+    if (state.mode === 'dex') {
+      if (id === 'dexclose') { ui.press = id; return; }
+      dexDrag = { x: p[0], y: p[1], scroll: dexScroll, nudge: dexNudge, moved: 0, spin: !!dexPick };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      return;
+    }
+    if (state.mode === 'title' || state.mode === 'sign' || state.mode === 'pause') {
       ui.press = id;
       return;
     }
@@ -774,12 +781,31 @@
       enc.by = p[1] - BALL / 2;
       return;
     }
+    if (dexDrag && state.mode === 'dex') {
+      const dx = p[0] - dexDrag.x;
+      const dy = p[1] - dexDrag.y;
+      dexDrag.moved = Math.max(dexDrag.moved, Math.hypot(dx, dy));
+      if (dexDrag.spin) dexNudge = dexDrag.nudge + Math.round(dx / (8 * PX));
+      else dexScroll = dexDrag.scroll - dy;
+      return;
+    }
     if (!stick.on || state.mode !== 'explore') return;
     stick.x = p[0];
     stick.y = p[1];
   }
   function onPointerUp(e) {
     const p = e ? canvasPoint(e) : null;
+    if (dexDrag) {
+      const drag = dexDrag;
+      dexDrag = null;
+      if (p && drag.moved < 12 && !drag.spin) {
+        const id = hitAt(p[0], p[1]);
+        if (id && id.indexOf('dexmon:') === 0) activate(id);
+      } else if (!drag.spin) {
+        const rowH = 14 * PX;
+        dexScroll = Math.round(dexScroll / rowH) * rowH;
+      }
+    }
     if (enc.drag && ui.press !== 'pause') releaseThrow();
     if (ui.press && p) {
       const id = hitAt(p[0], p[1]);
@@ -1225,10 +1251,35 @@
     return c;
   }
 
+  function frameSil(id, frame) {
+    const key = id + ':' + frame;
+    if (animSil[key]) return animSil[key];
+    const spec = speciesById[id];
+    const sheet = animImg[id];
+    const a = spec && spec.anim;
+    if (!a || !sheet) return spriteSil[id];
+    const c = document.createElement('canvas');
+    c.width = a.w;
+    c.height = a.h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(sheet, frame * a.w, 0, a.w, a.h, 0, 0, a.w, a.h);
+    const im = g.getImageData(0, 0, a.w, a.h);
+    const d = im.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 16) { d[i + 3] = 0; continue; }
+      d[i] = 8; d[i + 1] = 8; d[i + 2] = 8; d[i + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+    animSil[key] = c;
+    return c;
+  }
+
   function drawChip(footTop) {
     const mon = enc.mon;
-    const sil = spriteSil[mon.id];
-    if (!sil) return;
+    const base = spriteSil[mon.id];
+    if (!base) return;
+    const view = animIndex(mon.id);
+    const sil = view ? frameSil(mon.id, view.frame) : base;
     // Screen overlay only. Red's world position and camera are not touched.
     const redBottom = snap(state.y - state.camY - SPRITE + PX) + SPRITE;
     const bandTop = snap(redBottom + 2 * PX);
@@ -1473,8 +1524,6 @@
     const name = mon.name;
     drawText(name, snap(x + (w - textW(name)) / 2), y + 2 * PX, INK);
     drawText(mon.type, snap(x + (w - textW(mon.type)) / 2), y + 12 * PX, INK);
-    const sw = img.width * PX;
-    const sh = img.height * PX;
     const showAway = enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled';
     const awayH = showAway ? buttonSize('BACK AWAY', w - 4 * PX).h : 0;
     const ballY = snap(y + h - awayH - BALL - 3 * PX);
@@ -1486,14 +1535,27 @@
       enc.by = ballY;
     }
     const meterY = snap(ballY - 14 * PX);
-    let spriteY = y + 22 * PX;
-    const limitBottom = meterY - 4 * PX;
-    if (spriteY + sh > limitBottom) spriteY = snap(Math.max(y + 22 * PX, limitBottom - sh));
+    const view = animIndex(mon.id);
+    const aw = view ? view.a.w : img.width;
+    const ah = view ? view.a.h : img.height;
+    const areaTop = snap(y + 22 * PX);
+    const areaBot = snap(meterY - 18 * PX);
+    const availW = w - 4 * PX;
+    const availH = Math.max(8 * PX, areaBot - areaTop);
+    const fit = Math.max(1, Math.floor(Math.min(availW / aw, availH / ah)));
+    const sw = aw * fit;
+    const sh = ah * fit;
     const spriteX = snap(x + (w - sw) / 2);
+    const spriteY = snap(areaTop + (availH - sh) / 2);
     ui.mon = { x: spriteX, y: spriteY, w: sw, h: sh };
     if (!enc.hideMon) {
       crisp();
-      ctx.drawImage(img, 0, 0, img.width, img.height, spriteX, spriteY, sw, sh);
+      const bob = [0, 0, PX, PX, 0, 0, -PX, 0][((animTick / 8) | 0) % 8];
+      if (view) {
+        ctx.drawImage(view.sheet, view.frame * view.a.w, 0, view.a.w, view.a.h, spriteX, snap(spriteY + bob), sw, sh);
+      } else {
+        ctx.drawImage(img, 0, 0, img.width, img.height, spriteX, spriteY, sw, sh);
+      }
       drawHitRing();
     }
     if (enc.phase === 'caught') {
@@ -1536,6 +1598,16 @@
     if (showAway) placeButton(x + 2 * PX, snap(y + h - awayH - PX), 'away', enc.phase === 'aim' ? 'BACK AWAY' : 'WALK', w - 4 * PX);
   }
 
+  function animIndex(id) {
+    const spec = speciesById[id];
+    const sheet = animImg[id];
+    if (!spec || !spec.anim || !sheet) return null;
+    const n = spec.anim.n;
+    let frame = (((animTick / 8) | 0) + dexNudge) % n;
+    if (frame < 0) frame += n;
+    return { spec: spec, sheet: sheet, frame: frame, a: spec.anim };
+  }
+
   function drawDex(footTop) {
     const x = PX;
     const y = 16 * PX;
@@ -1550,40 +1622,53 @@
     const btnH = buttonSize('OK').h;
     const by = snap(y + h - btnH - 2 * PX);
     const listTop = y + 2 * PX + titleLines.length * 8 * PX + PX;
-    if (dexPick === TURN_ID && turnSheet) {
-      dexSpin++;
-      const name = 'BULBASAUR';
-      drawText(name, snap(x + (w - textW(name)) / 2), listTop, INK);
-      drawText('GRASS', snap(x + (w - textW('GRASS')) / 2), listTop + 10 * PX, INK);
-      const frame = ((dexSpin / 8) | 0) % TURN_N;
-      const dw = TURN_CELL * PX;
-      const dh = dw;
+    const view = animIndex(dexPick);
+    if (view) {
+      const a = view.a;
+      drawText(view.spec.name, snap(x + (w - textW(view.spec.name)) / 2), listTop, INK);
+      drawText(view.spec.type, snap(x + (w - textW(view.spec.type)) / 2), listTop + 10 * PX, INK);
+      const top = snap(listTop + 20 * PX);
+      const availW = w - 4 * PX;
+      const availH = Math.max(PX, by - PX - top);
+      const fit = Math.max(1, Math.floor(Math.min(availW / a.w, availH / a.h)));
+      const dw = a.w * fit;
+      const dh = a.h * fit;
       const dx = snap(x + (w - dw) / 2);
-      const dy = snap(listTop + 20 * PX);
+      const dy = snap(top + (availH - dh) / 2);
       crisp();
-      ctx.drawImage(turnSheet, frame * TURN_CELL, 0, TURN_CELL, TURN_CELL, dx, dy, dw, dh);
+      ctx.drawImage(view.sheet, view.frame * a.w, 0, a.w, a.h, dx, dy, dw, dh);
       placeButton(x + 2 * PX, by, 'dexclose', 'BACK', w - 4 * PX);
       return;
     }
-    const bw = snap((w - 8 * PX) / 3);
-    const rowH = 10 * PX;
-    const rows = Math.max(1, Math.floor((by - PX - listTop) / rowH));
-    const maxScroll = Math.max(0, D.species.length - rows);
+    const rowH = 14 * PX;
+    const viewH = Math.max(rowH, by - PX - listTop);
+    const maxScroll = Math.max(0, D.species.length * rowH - viewH);
     if (dexScroll > maxScroll) dexScroll = maxScroll;
     if (dexScroll < 0) dexScroll = 0;
-    for (let i = 0; i < rows; i++) {
-      const s = D.species[i + dexScroll];
-      if (!s) break;
+    const scroll = snap(dexScroll);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, listTop, w - 5 * PX, viewH);
+    ctx.clip();
+    for (let i = 0; i < D.species.length; i++) {
+      const s = D.species[i];
+      const ry = listTop + i * rowH - scroll;
+      if (ry < listTop || ry + rowH > listTop + viewH) continue;
       const have = dex.indexOf(s.id) >= 0;
-      const ry = listTop + i * rowH;
       drawText(have ? s.name : '???', x + 2 * PX, ry, have ? INK : SHADE);
-      if (have && s.id === TURN_ID) {
-        ui.hits.push({ id: 'dexspin', x: x, y: ry, w: w, h: rowH });
-      }
+      if (have) ui.hits.push({ id: 'dexmon:' + s.id, x: x, y: ry, w: w - 6 * PX, h: rowH });
     }
-    placeButton(x + 2 * PX, by, 'dexup', 'UP', bw);
-    placeButton(x + 4 * PX + bw, by, 'dexdown', 'DN', bw);
-    placeButton(x + 6 * PX + bw * 2, by, 'dexclose', 'OK', bw);
+    ctx.restore();
+    if (maxScroll > 0) {
+      const tx = snap(x + w - 5 * PX);
+      const thumbH = Math.max(8 * PX, snap(viewH * viewH / (viewH + maxScroll)));
+      const thumbY = snap(listTop + (viewH - thumbH) * (scroll / maxScroll));
+      ctx.fillStyle = SHADE;
+      ctx.fillRect(tx, listTop, 3 * PX, viewH);
+      ctx.fillStyle = INK;
+      ctx.fillRect(tx, thumbY, 3 * PX, thumbH);
+    }
+    placeButton(x + 2 * PX, by, 'dexclose', 'OK', w - 4 * PX);
   }
 
   function hasSave() {
@@ -1781,9 +1866,12 @@
       closeDex();
       return;
     }
-    if (id === 'dexspin') { dexPick = TURN_ID; dexSpin = 0; IslandAudio.click(); return; }
-    if (id === 'dexup') { dexScroll = Math.max(0, dexScroll - 1); IslandAudio.click(); return; }
-    if (id === 'dexdown') { dexScroll += 1; IslandAudio.click(); return; }
+    if (id.indexOf('dexmon:') === 0) {
+      dexPick = id.slice(7);
+      dexNudge = 0;
+      IslandAudio.click();
+      return;
+    }
     if (id === 'away') {
       if (enc.phase === 'chip' || enc.phase === 'aim' || enc.phase === 'caught' || enc.phase === 'fled') {
         IslandAudio.click();
@@ -2339,6 +2427,12 @@
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    canvas.addEventListener('wheel', function (e) {
+      if (state.mode !== 'dex') return;
+      e.preventDefault();
+      if (dexPick) dexNudge += e.deltaY > 0 ? 1 : -1;
+      else dexScroll += e.deltaY > 0 ? 14 * PX : -14 * PX;
+    }, { passive: false });
     /* touch-action and user-select are not enough on iOS: a long-press still
        selects the canvas unless the touch sequence is cancelled. */
     const guards = ['touchstart', 'touchmove', 'touchend', 'gesturestart', 'gesturechange', 'gestureend'];
@@ -2642,7 +2736,9 @@
       if (saved && saved.volume === 'off') IslandAudio.setMuted(true);
       else if (saved && saved.volume === 'on') IslandAudio.setMuted(false);
       applyGraphics();
-      try { turnSheet = await loadImage('assets/dex/bulbasaur-turn.png'); } catch (e) { turnSheet = null; }
+      await Promise.all(D.species.map(function (s) {
+        return loadImage('assets/dex/' + s.id + '-anim.png').then(function (img) { animImg[s.id] = img; });
+      }));
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
       ready = true;
     } catch (err) {
