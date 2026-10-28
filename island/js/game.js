@@ -121,11 +121,8 @@
   let waterTick = 0;
   let dexScroll = 0;
   let dexPick = null;
-  let dexSpin = 0;
-  let turnSheet = null;
-  const TURN_ID = 'bulbasaur';
-  const TURN_N = 8;
-  const TURN_CELL = 32;
+  let animTick = 0;
+  const animImg = {};
   const spriteImg = {};
   const spriteSil = {};
   const ui = { hits: [], press: null, mon: null, ballHome: null, ballHit: null };
@@ -490,6 +487,7 @@
   }
 
   function render() {
+    animTick++;
     const w = state.viewW, h = state.viewH;
     let camX = state.x - w / 2;
     let camY = state.y - h / 2;
@@ -1550,18 +1548,19 @@
     const btnH = buttonSize('OK').h;
     const by = snap(y + h - btnH - 2 * PX);
     const listTop = y + 2 * PX + titleLines.length * 8 * PX + PX;
-    if (dexPick === TURN_ID && turnSheet) {
-      dexSpin++;
-      const name = 'BULBASAUR';
-      drawText(name, snap(x + (w - textW(name)) / 2), listTop, INK);
-      drawText('GRASS', snap(x + (w - textW('GRASS')) / 2), listTop + 10 * PX, INK);
-      const frame = ((dexSpin / 8) | 0) % TURN_N;
-      const dw = TURN_CELL * PX;
-      const dh = dw;
+    const picked = dexPick && speciesById[dexPick];
+    const sheet = picked && animImg[dexPick];
+    if (picked && picked.anim && sheet) {
+      const a = picked.anim;
+      drawText(picked.name, snap(x + (w - textW(picked.name)) / 2), listTop, INK);
+      drawText(picked.type, snap(x + (w - textW(picked.type)) / 2), listTop + 10 * PX, INK);
+      const frame = ((animTick / 8) | 0) % a.n;
+      const dw = a.w * PX;
+      const dh = a.h * PX;
       const dx = snap(x + (w - dw) / 2);
       const dy = snap(listTop + 20 * PX);
       crisp();
-      ctx.drawImage(turnSheet, frame * TURN_CELL, 0, TURN_CELL, TURN_CELL, dx, dy, dw, dh);
+      ctx.drawImage(sheet, frame * a.w, 0, a.w, a.h, dx, dy, dw, dh);
       placeButton(x + 2 * PX, by, 'dexclose', 'BACK', w - 4 * PX);
       return;
     }
@@ -1577,9 +1576,7 @@
       const have = dex.indexOf(s.id) >= 0;
       const ry = listTop + i * rowH;
       drawText(have ? s.name : '???', x + 2 * PX, ry, have ? INK : SHADE);
-      if (have && s.id === TURN_ID) {
-        ui.hits.push({ id: 'dexspin', x: x, y: ry, w: w, h: rowH });
-      }
+      if (have) ui.hits.push({ id: 'dexmon:' + s.id, x: x, y: ry, w: w, h: rowH });
     }
     placeButton(x + 2 * PX, by, 'dexup', 'UP', bw);
     placeButton(x + 4 * PX + bw, by, 'dexdown', 'DN', bw);
@@ -1781,7 +1778,11 @@
       closeDex();
       return;
     }
-    if (id === 'dexspin') { dexPick = TURN_ID; dexSpin = 0; IslandAudio.click(); return; }
+    if (id.indexOf('dexmon:') === 0) {
+      dexPick = id.slice(7);
+      IslandAudio.click();
+      return;
+    }
     if (id === 'dexup') { dexScroll = Math.max(0, dexScroll - 1); IslandAudio.click(); return; }
     if (id === 'dexdown') { dexScroll += 1; IslandAudio.click(); return; }
     if (id === 'away') {
@@ -2642,7 +2643,9 @@
       if (saved && saved.volume === 'off') IslandAudio.setMuted(true);
       else if (saved && saved.volume === 'on') IslandAudio.setMuted(false);
       applyGraphics();
-      try { turnSheet = await loadImage('assets/dex/bulbasaur-turn.png'); } catch (e) { turnSheet = null; }
+      await Promise.all(D.species.map(function (s) {
+        return loadImage('assets/dex/' + s.id + '-anim.png').then(function (img) { animImg[s.id] = img; });
+      }));
       if (!sheets.center || !sheets.house) throw new Error('red interiors');
       ready = true;
     } catch (err) {
